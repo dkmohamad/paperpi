@@ -1,0 +1,47 @@
+[Unit]
+Description=paperpi status display and scan control
+Documentation=https://github.com/pimoroni/st7789-python
+# The status screen shows the box's own address, so it wants the network up
+# before it draws its first frame -- otherwise the first screen shows "no
+# address" until the next poll.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/paperpi
+ExecStart=/home/admin/paperpi/.venv/bin/python -m paperpi --scan-dir /mnt/scans
+Restart=on-failure
+RestartSec=5
+
+# Where scans are written is a deployment choice, so it lives here rather than
+# in the code -- the default in config.py stays sensible for a development
+# machine that has no /mnt/scans.
+#
+# Deliberately NOT RequiresMountsFor=/mnt/scans: if the drive is unplugged the
+# display should still come up and report storage as absent, which is more use
+# than a service that refuses to start.
+#
+# A system unit rather than a user one: lingering is off on this machine, so a
+# --user unit would neither start at boot nor survive the session ending. The
+# panel and buttons are still reached as `admin`, through its spi and gpio
+# group membership, so nothing here runs as root.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/mnt/scans
+
+# lgpio opens notification pipes (.lgd-nfy*) in its working directory, and
+# gpiozero's button callbacks ride on them. With ProtectHome=read-only that
+# write fails and the buttons go dead, so point lgpio at an ephemeral runtime
+# directory instead of making the code directory writable.
+RuntimeDirectory=paperpi
+Environment=LG_WD=/run/paperpi
+# PrivateDevices is deliberately NOT set: it would hide /dev/spidev0.1 and the
+# gpiochips, which are the entire point of this service.
+
+[Install]
+WantedBy=multi-user.target

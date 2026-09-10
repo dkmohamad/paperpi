@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+/scans/
+
+# Secrets. This repo is public.
+#
+# The card's cloud-init carries a password hash, an authorised key and the wifi
+# PSK in clear. None of it is useful to anyone else and all of it is harmful to
+# publish.
+/provisioning/console-password.txt
+/provisioning/boot/user-data
+/provisioning/boot/network-config

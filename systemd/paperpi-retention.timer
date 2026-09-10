@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily paperpi scan retention
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=daily
+# A box that was powered off overnight should tidy up when it comes back rather
+# than skipping the run and waiting another full day.
+Persistent=true
+# Nothing here is time-critical, and firing at exactly midnight alongside every
+# other daily job is the one moment the machine is busiest.
+RandomizedDelaySec=30m
+Unit=paperpi-retention.service
+
+[Install]
+WantedBy=timers.target

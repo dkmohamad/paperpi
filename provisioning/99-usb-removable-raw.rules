@@ -1,0 +1,41 @@
+# Raw block-device access to removable USB media, for members of `plugdev`.
+#
+# WHAT THIS GOVERNS
+# Any USB device the kernel flags removable - SD cards in a reader, USB sticks,
+# card readers of any brand. It is a policy about removable media, not about SD
+# cards or about imaging, so it applies equally to reading a stick, imaging one,
+# or writing a Raspberry Pi image.
+#
+# WHY IT EXISTS
+# Writing a raw image is the one routine job needing raw block-device access.
+# Under sudo that command runs as root, where a mistyped device name reaches any
+# disk in the machine. This inverts it: the command runs unprivileged, and the
+# kernel refuses every device this rule does not cover.
+#
+# WHY IT IS SAFE
+# The match requires BOTH the USB bus AND the kernel's removable flag. Internal
+# SATA and NVMe disks report a non-usb bus and removable=0, so they can never
+# match, whatever is typed. The protection is a kernel permission check, not a
+# script that can be edited or bypassed.
+#
+# WHY GROUP= AND NOT TAG+="uaccess"
+# uaccess looks like the tidier choice and does not work for block devices here,
+# for two independent reasons. systemd runs the uaccess builtin from
+# 70-uaccess.rules, which is ordered BEFORE any 99- file, so a tag set here
+# arrives too late to be acted on; and uaccess only grants on devices assigned
+# to a seat, which block devices are not. The tag gets set and nothing happens.
+# `plugdev` is the conventional group for pluggable devices, is deterministic,
+# and needs no logind session, so it is used instead. Do not "simplify" this
+# back to uaccess.
+#
+# WHAT IT DELIBERATELY DOES NOT DO
+# It does not use the `disk` group. That group grants raw access to EVERY block
+# device, internal ones included - strictly worse than sudo, since it widens the
+# reach while removing the confirmation prompt.
+SUBSYSTEM=="block", KERNEL=="sd[a-z]", ENV{ID_BUS}=="usb", ATTR{removable}=="1", GROUP="plugdev", MODE="0660"
+
+# Narrower alternative: pin one specific reader instead of all removable USB
+# media. Comment the rule above and uncomment this to restrict access to the
+# Norelsys NS1081 bridge; another reader would need its own idVendor/idProduct,
+# found with: udevadm info -a --name=/dev/sdX | grep -m2 'idVendor\|idProduct'
+#SUBSYSTEM=="block", KERNEL=="sd[a-z]", ENV{ID_BUS}=="usb", ATTR{removable}=="1", ATTRS{idVendor}=="2537", ATTRS{idProduct}=="1081", GROUP="plugdev", MODE="0660"

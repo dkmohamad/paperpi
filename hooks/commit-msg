@@ -1,0 +1,58 @@
+#!/bin/sh
+# Commit message gate.
+#
+# The same three rules the Casomo repos enforce through commitlint, in plain
+# shell so a Python project does not have to carry npm and husky just to host
+# them. Wire it with:
+#
+#     git config core.hooksPath hooks
+#
+# core.hooksPath is local config and cannot be committed, so a fresh clone must
+# run that once. The hook itself is tracked, so nobody has to write it again.
+set -eu
+
+MSG_FILE="$1"
+
+# Two things must come off before checking. Comment lines are git's own and are
+# stripped from the final message anyway. The scissors block is what `git commit
+# -v` appends -- it carries the entire diff, and scanning that would fail any
+# commit that merely touched the word "claude" in a file.
+MESSAGE=$(sed -e '/^# *-\{1,\} *>8 *-\{1,\}/,$d' -e '/^#/d' "$MSG_FILE")
+
+HEADER=$(printf '%s\n' "$MESSAGE" | sed -n '1p')
+BODY=$(printf '%s\n' "$MESSAGE" | sed -n '2,$p')
+
+# Generated messages are git's own wording, not the author's, so they are not
+# this hook's business to reject.
+case "$HEADER" in
+  "Merge "*|"Revert "*|"fixup!"*|"squash!"*) exit 0 ;;
+esac
+
+fail() {
+  printf '\ncommit rejected: %s\n' "$1" >&2
+  exit 1
+}
+
+if [ "${#HEADER}" -gt 50 ]; then
+  fail "header is ${#HEADER} characters, limit is 50
+  $HEADER"
+fi
+
+printf '%s\n' "$BODY" | while IFS= read -r line; do
+  if [ "${#line}" -gt 72 ]; then
+    printf '\ncommit rejected: body line is %s characters, limit is 72\n  %s\n' \
+      "${#line}" "$line" >&2
+    exit 1
+  fi
+done || exit 1
+
+# The footer is the point. Git files trailers like `Co-Authored-By:` there, so a
+# check that only looked at the header and body would miss the exact line this
+# rule exists to catch.
+FOUND=$(printf '%s\n' "$MESSAGE" | grep -oiE 'anthropic|claude|co-authored-by' \
+  | sort -u | tr '\n' ' ' || true)
+if [ -n "$FOUND" ]; then
+  fail "must not mention AI tools: found ${FOUND}"
+fi
+
+exit 0

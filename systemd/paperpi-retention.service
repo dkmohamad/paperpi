@@ -1,0 +1,21 @@
+[Unit]
+Description=paperpi scan retention
+# Nothing to do if the drive is not mounted. Without this the job would happily
+# prune the fallback directory on the SD card, which is not what it is for --
+# and an unmounted drive means the scans it should be pruning are not visible,
+# so a run would report "nothing to remove" and look like success.
+ConditionPathIsMountPoint=/mnt/scans
+
+[Service]
+Type=oneshot
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/paperpi
+ExecStart=/home/admin/paperpi/.venv/bin/python -m paperpi.retention \
+    --scan-dir /mnt/scans --days 90
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/mnt/scans

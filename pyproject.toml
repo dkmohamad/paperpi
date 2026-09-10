@@ -1,0 +1,89 @@
+[project]
+name = "paperpi"
+version = "0.1.0"
+description = "Status display and scan control for the home scanner/printer Pi"
+requires-python = ">=3.13"
+dependencies = [
+    "pillow>=11.0",
+    "qrcode>=8.0",
+]
+
+# Hardware-only. The dev machine never installs these; adapters/hat.py imports
+# them lazily so the package is importable without them.
+[project.optional-dependencies]
+hat = [
+    "gpiozero>=2.0",
+    "lgpio>=0.2.2",
+    "st7789>=1.0.1",
+]
+
+[project.scripts]
+paperpi = "paperpi.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pygame>=2.6",
+    "pyright>=1.1.400",
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["paperpi"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+    "D100",   # missing docstring in public module
+    "D103",   # missing docstring in public function
+    "PLC0415", # import should be at top of file
+    "RUF022", # __all__ is not sorted
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests don't need module/function docstrings.
+"tests/**" = ["D100", "D103"]
+# These two import their optional dependencies inside the factory that uses
+# them, so the package stays importable on a machine with neither the HAT
+# libraries nor pygame installed.
+"paperpi/adapters/hat.py" = ["PLC0415"]
+"paperpi/adapters/preview.py" = ["PLC0415"]
+# The composition root picks one adapter pair at runtime; importing both at
+# module scope would require every machine to have every backend installed.
+"paperpi/__main__.py" = ["PLC0415"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["paperpi"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.13"
+include = ["paperpi", "tests"]
+# Strict keeps the real safety. These are off only because qrcode, pygame and
+# the hardware libraries (st7789, gpiozero) ship no type stubs.
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+
+# Tests legitimately reach into module-internal helpers.
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = false
