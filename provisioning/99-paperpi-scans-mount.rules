@@ -1,0 +1,23 @@
+# Remount the scan drive when it reappears on the bus.
+#
+# WHY THIS EXISTS
+# A plain /etc/fstab entry mounts once, at boot. If the device drops off the
+# bus -- a nudged connector, a bus reset when another device is plugged into
+# the same hub, a brief power dip -- systemd unmounts it correctly and then
+# does nothing when it comes back. The mount stays dead until somebody logs in
+# and notices.
+#
+# On a headless box with no keyboard that is the worst kind of failure: nothing
+# errors, scans simply start landing on the SD card instead of the drive, and
+# the only sign is one word on a 2-inch panel.
+#
+# Observed on 2026-09-10: the drive re-enumerated while a printer was being
+# plugged into the same hub, and /mnt/scans was unmounted for good.
+#
+# WHY NOT x-systemd.automount
+# automount would also recover, but it leaves an autofs mount on /mnt/scans
+# even when no drive is present, so `is_mount()` returns true and the display
+# would report removable storage that is not there. Preferring a rule that
+# keeps the mount state honest over one that makes the status lie.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="FAE7-EBB9", \
+  RUN+="/usr/bin/systemctl --no-block start mnt-scans.mount"

@@ -187,6 +187,7 @@ list of causes.
 | `boot/network-config` | netplan: eth0 + wlan0, both optional. `0600`. |
 | `boot/meta-data` | instance-id and local-hostname |
 | `boot/ssh` | Empty flag; without it Raspberry Pi OS leaves SSH off |
+| `99-paperpi-scans-mount.rules` | Remounts the scan drive when it reappears |
 | `provisioning/console-password.txt` | The console passphrase in clear. `0600`. |
 
 `provisioning/console-password.txt` and `boot/user-data` / `boot/network-config` hold a

@@ -20,6 +20,13 @@ something nobody has named.
       not duplicated here. Nothing else in this list depends on it except the
       SANE work below.
 
+## Watch
+
+- [ ] `wlan0` is now enabled but repeatedly disconnecting in the journal
+      (`CTRL-EVENT-DISCONNECTED reason=7`). The box is on ethernet so nothing is
+      broken, but the wifi fallback is not proven to work — worth confirming
+      the credentials are still current before relying on it.
+
 ## Secrets
 
 - [ ] **Move the console passphrase into your password manager**, then the file
