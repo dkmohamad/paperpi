@@ -23,6 +23,8 @@ _FOOTER_HEIGHT = 26
 _ROW_HEIGHT = 34
 _ROW_TOP = _TITLE_HEIGHT + 12
 _DOT_RADIUS = 5
+# Space either side of the row label, between the dot and the detail.
+_LABEL_GAP = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,16 +179,29 @@ class Canvas:
             ),
             fill=dot.as_tuple(),
         )
+        label_x = centre_x + _DOT_RADIUS + _LABEL_GAP
         self._draw.text(
-            (centre_x + _DOT_RADIUS + 10, middle),
+            (label_x, middle),
             label,
             font=self._fonts.label,
             fill=config.TEXT.as_tuple(),
             anchor="lm",
         )
+        # The label is left-aligned and the detail right-aligned, so a long
+        # detail grows leftward into the label and the two overprint. Dropping
+        # the middle keeps the device the detail names and the state it
+        # reports; eliding the end would keep the device and lose the fault,
+        # which is the half worth reading.
+        available = int(
+            config.DISPLAY_WIDTH
+            - config.MARGIN
+            - label_x
+            - self._draw.textlength(label, font=self._fonts.label)
+            - _LABEL_GAP
+        )
         self._draw.text(
             (config.DISPLAY_WIDTH - config.MARGIN, middle),
-            detail,
+            self.truncated(detail, self._fonts.detail, available),
             font=self._fonts.detail,
             fill=config.MUTED.as_tuple(),
             anchor="rm",

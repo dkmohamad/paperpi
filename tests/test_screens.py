@@ -101,7 +101,7 @@ def test_status_led_should_show_the_worst_peripheral_state(fonts: Fonts):
 def test_status_should_start_a_scan_on_any_button(fonts: Fonts):
     """Every button triggers a scan until the scanner's own button exists.
 
-    The Notion build splits these later (A scans, B unmounts); until then the
+    The build spec splits these later (A scans, B unmounts); until then the
     panel should respond to whichever one is pressed rather than only one.
     """
     for button in Button:
@@ -237,7 +237,7 @@ def test_done_should_return_home_unattended(fonts: Fonts):
 def test_error_should_wait_to_be_dismissed(fonts: Fonts):
     """A failure stays until acknowledged rather than timing out.
 
-    The Notion build's requirement is that a failure is never silent; a message
+    The build spec's requirement is that a failure is never silent; a message
     that clears itself while nobody is looking is silent.
     """
     screen = ErrorScreen(message="paper jam", home=_home)

@@ -1,14 +1,13 @@
 # paperpi — card build
 
 Card build for the headless Raspberry Pi that serves the home scanner and
-printer, per the Notion task *Home Scanner + Printer Server (Pi build)*. This
-covers getting a clean, reachable Pi; the scan and print stacks are installed
-over SSH afterwards.
+printer. This covers getting a clean, reachable Pi; the scan and print stacks
+are installed over SSH afterwards, in the [top-level README](../README.md).
 
 ## Background
 
 **The old card.** Raspberry Pi OS Lite 64-bit, image 2025-12-04, hostname
-`raspberrypi`, user `dmohamad`. Its entire history of use was one `apt install
+`raspberrypi`, with a personal user account. Its entire history of use was one `apt install
 pulseaudio ... avahi-daemon` (an AudioRelay experiment) and a five-line shell
 history — empty `/opt`, `/srv`, `/root`, no custom units, bare home directory.
 Nothing worth preserving, so reflashing beat tidying, and it picks up an image
@@ -166,17 +165,18 @@ To change the hostname or user, edit `boot/user-data` before step 5 — and keep
 
 ## Next
 
-Once it is up, per the task: `apt install sane-utils` and confirm with
-`scanimage -L`; `scanimage -A` to learn whether the scanner's own button is
-usable, which decides whether it or the HAT's Button A becomes the trigger; the
-fixed scan profile (Lineart/Gray, 300 dpi, ADF duplex); `scanbd` for the
-trigger; a Samba share on the pen drive mounted by UUID; the HAT status script
-with Button B to unmount; CUPS + avahi-daemon + the Epson driver shared for
-AirPrint; and a cron job for 90-day retention.
+This document ends at a clean, reachable Pi. Everything installed over SSH
+afterwards — the display service, the scan drive, the web index, retention and
+the print queue — is in the [top-level README](../README.md), which is the one
+to follow for a rebuild.
 
-None of this runs at first boot, deliberately — a failed package install is
-close to invisible on a headless box, so a Pi that does not come up has a short
-list of causes.
+Still outstanding there is the scanner: `sane-utils`, `scanimage -L` to confirm
+detection, and `scanimage -A` to learn whether the scanner's own button is
+usable, which decides whether it or the HAT's Button A becomes the trigger.
+
+None of it runs at first boot, deliberately — a failed package install is close
+to invisible on a headless box, so a Pi that does not come up has a short list
+of causes.
 
 ## Files
 
@@ -190,6 +190,9 @@ list of causes.
 | `99-paperpi-scans-mount.rules` | Remounts the scan drive when it reappears |
 | `provisioning/console-password.txt` | The console passphrase in clear. `0600`. |
 
-`provisioning/console-password.txt` and `boot/user-data` / `boot/network-config` hold a
-passphrase, a password hash and a Wi-Fi PSK in clear. That is why this directory
-is not a git repo; all three are in `.gitignore` should it ever become one.
+`console-password.txt` and `boot/user-data` / `boot/network-config` hold a
+passphrase, a password hash and a Wi-Fi PSK in clear. **This directory is
+tracked, in a public repo**, so those three are named in `.gitignore` and are
+the reason it exists. `git add -f` defeats that, so check before forcing
+anything here. The passphrase should not live in a file at all; moving it to a
+password manager is tracked in [TODO.md](../TODO.md).

@@ -21,12 +21,17 @@ from typing import NewType, Self
 
 __all__ = [
     "Button",
+    "FaultSeverity",
     "LedChannel",
     "Network",
     "PageScanned",
     "Peripheral",
     "PeripheralKind",
     "Peripherals",
+    "PrintQueue",
+    "QueueConnection",
+    "QueueFault",
+    "QueueState",
     "Readiness",
     "Rgb",
     "Scan",
@@ -227,6 +232,104 @@ class Peripherals(Collection[Peripheral]):
         )
 
 
+class QueueState(StrEnum):
+    """What a print queue is doing, as IPP reports it.
+
+    IPP models this as an integer (RFC 8011, printer-state): 3 idle,
+    4 processing, 5 stopped. Naming the three here keeps that mapping inside
+    the adapter that speaks IPP, rather than letting bare numbers reach the
+    display.
+    """
+
+    IDLE = "idle"
+    PRINTING = "printing"
+    STOPPED = "stopped"
+
+
+class QueueConnection(StrEnum):
+    """How a queue reaches the thing it prints on.
+
+    The distinction the display needs is whether a queue drives the printer
+    plugged into this machine or something elsewhere, so that adding a second
+    queue for a printer in another room cannot change what this box reports
+    about its own. Naming it here means the URI scheme that decides it stays
+    inside the adapter that speaks to the print server.
+    """
+
+    USB = "usb"
+    NETWORK = "network"
+    OTHER = "other"
+
+
+class FaultSeverity(StrEnum):
+    """How much a reported fault wants a human.
+
+    IPP suffixes every state reason with one of these, and the suffix is
+    per-reason: a queue can report a warning and an error at once. Discarding
+    it would leave the faults unordered, and something downstream would then
+    pick by list position -- which is how "ink low" gets displayed while the
+    printer is jammed.
+    """
+
+    REPORT = "report"
+    WARNING = "warning"
+    ERROR = "error"
+
+    @property
+    def rank(self) -> int:
+        """Order for choosing the fault most worth showing."""
+        return _FAULT_RANK[self]
+
+
+@dataclass(frozen=True, slots=True)
+class QueueFault:
+    """One thing a print queue is complaining about.
+
+    Attributes:
+        keyword: The bare IPP keyword -- media-empty, media-jam, cover-open.
+            Standardised, so it can be matched on, unlike translated prose.
+        severity: How loudly IPP was complaining about this one.
+    """
+
+    keyword: str
+    severity: FaultSeverity
+
+
+@dataclass(frozen=True, slots=True)
+class PrintQueue:
+    """A configured print queue, as the print server reports it.
+
+    Attributes:
+        name: The queue name, which is also what clients see advertised.
+        connection: Whether this queue drives the locally attached printer or
+            something across the network.
+        state: What the queue is doing now.
+        accepting: Whether it will take new jobs. A queue can be idle and
+            still refuse work, which is a different fault from being stopped,
+            so the two are not collapsed.
+        faults: Everything it is complaining about, in the order reported.
+    """
+
+    name: str
+    connection: QueueConnection
+    state: QueueState
+    accepting: bool
+    faults: tuple[QueueFault, ...]
+
+    @property
+    def worst_fault(self) -> QueueFault | None:
+        """The fault most worth a line on a display that has room for one.
+
+        Ranked by severity rather than taken from the front of the list: IPP
+        does not order state reasons by importance, so the first one is an
+        accident of the server's iteration.
+
+        Returns:
+            None when nothing is wrong.
+        """
+        return max(self.faults, key=lambda fault: fault.severity.rank, default=None)
+
+
 @dataclass(frozen=True, slots=True)
 class Network:
     """The Pi's own reachability, shown so a headless box can be found.
@@ -368,6 +471,13 @@ type ScanEvent = ScanStarted | PageScanned | ScanFinished | ScanFailed
 # Ranked by how much they want a human. An attached-but-unusable device
 # outranks an absent one: absent is the expected state of a box whose scanner
 # has not arrived, whereas unconfigured is a job someone has left half done.
+# Ranked so the display shows the loudest complaint when it has room for one.
+_FAULT_RANK = {
+    FaultSeverity.REPORT: 0,
+    FaultSeverity.WARNING: 1,
+    FaultSeverity.ERROR: 2,
+}
+
 _SEVERITY = {
     Readiness.READY: 0,
     Readiness.BUSY: 1,

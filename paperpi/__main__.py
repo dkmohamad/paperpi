@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import app, config
+from .adapters.printer_cups import CupsQueues
 from .adapters.scan_fake import FakeScanner
 from .adapters.status_linux import LinuxStatus, current_address
 from .models import PageScanned, ScanEvent, ScanFinished, ScanId, ScanStarted, Side
@@ -40,7 +41,7 @@ def main() -> None:
     scan_dir: Path = args.scan_dir
     scan_dir.mkdir(parents=True, exist_ok=True)
     fonts = Fonts.load()
-    status = LinuxStatus(scan_dir=scan_dir)
+    status = LinuxStatus(scan_dir=scan_dir, queues=CupsQueues())
     hostname = socket.gethostname()
 
     # The address is asked for per link rather than sampled once: a lease can
@@ -158,7 +159,10 @@ def _sample_screens(library: ScanLibrary, hostname: str) -> dict[str, Screen]:
         duration=timedelta(seconds=48),
     )
 
-    status = LinuxStatus(scan_dir=library.directory)
+    # No queue source for a screenshot pass: it renders layouts, and reaching
+    # for a live print server to do it would make the output depend on the
+    # machine it ran on.
+    status = LinuxStatus(scan_dir=library.directory, queues=lambda: ())
     home = StatusScreen(
         status=status,
         start_scan=_unavailable,

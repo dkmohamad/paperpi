@@ -11,7 +11,7 @@
 # errors, scans simply start landing on the SD card instead of the drive, and
 # the only sign is one word on a 2-inch panel.
 #
-# Observed on 2026-09-10: the drive re-enumerated while a printer was being
+# the drive re-enumerated while a printer was being
 # plugged into the same hub, and /mnt/scans was unmounted for good.
 #
 # WHY NOT x-systemd.automount

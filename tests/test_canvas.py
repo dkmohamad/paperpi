@@ -1,6 +1,10 @@
 """Text fitting, which is measured against the font rather than counted."""
 
-from paperpi.render.canvas import Canvas, Fonts
+from PIL import ImageChops
+
+from paperpi import config
+from paperpi.models import Rgb
+from paperpi.render.canvas import _ROW_HEIGHT, _ROW_TOP, Canvas, Fonts
 
 _ELLIPSIS = "\N{HORIZONTAL ELLIPSIS}"
 
@@ -89,3 +93,40 @@ def test_wrapped_should_always_return_at_least_one_line(fonts: Fonts):
     """
     canvas = Canvas.blank(fonts)
     assert canvas.wrapped("", fonts.detail, 200, 3) == [""]
+
+
+def test_a_long_row_detail_should_not_overprint_the_label(fonts: Fonts):
+    """The label is left-aligned and the detail right-aligned on one line.
+
+    Nothing stops them meeting in the middle, and when they do the row is
+    unreadable rather than merely ugly -- which matters most in the state it
+    happens in, a fault, where the row is the only thing reporting it.
+
+    The oracle is the rendered pixels, not the arithmetic: the label is drawn
+    once alone to find where it actually ends, then again beside an absurd
+    detail. If the detail encroached, those pixels would differ.
+    """
+    dot = Rgb(255, 0, 0)
+    band = (0, _ROW_TOP, config.DISPLAY_WIDTH, _ROW_TOP + _ROW_HEIGHT)
+    # Against the background rather than against black: the panel's ground is
+    # a dark blue, so getbbox() alone would call every pixel occupied.
+    empty = Canvas.blank(fonts).image
+
+    alone = Canvas.blank(fonts)
+    alone.row(0, dot, "PRINTER", "")
+    drawn = ImageChops.difference(alone.image, empty).crop(band).getbbox()
+    assert drawn is not None, "the label drew nothing, so this proves nothing"
+    label_end = drawn[2]
+
+    crowded = Canvas.blank(fonts)
+    crowded.row(
+        0,
+        dot,
+        "PRINTER",
+        "a device with an implausibly long product string \N{MIDDLE DOT} out of paper",
+    )
+
+    label_region = (0, _ROW_TOP, label_end, _ROW_TOP + _ROW_HEIGHT)
+    assert alone.image.crop(label_region).tobytes() == (
+        crowded.image.crop(label_region).tobytes()
+    )

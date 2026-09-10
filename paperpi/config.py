@@ -25,6 +25,7 @@ __all__ = [
     "LED_PINS",
     "MARGIN",
     "MUTED",
+    "PRINTER_FAULTS",
     "PRINTER_INTERFACE_CLASS",
     "READINESS_COLOURS",
     "SCANNER_USB_VENDORS",
@@ -76,6 +77,31 @@ DONE_SCREEN_SECONDS = 45
 # so the printer is detected structurally rather than by model.
 # Source: USB-IF Defined Class Codes, https://www.usb.org/defined-class-codes
 PRINTER_INTERFACE_CLASS = "07"
+
+# IPP reports faults as standardised keywords, which is what makes them worth
+# matching on -- but "media-empty" is not what someone standing at the machine
+# calls it. Anything unmapped reaches the display as its raw keyword rather
+# than being swallowed: an unnamed fault still needs to be visible.
+# Source: IANA IPP registry, printer-state-reasons keywords --
+# https://www.iana.org/assignments/ipp-registrations
+# The registry rather than RFC 8011: several of these, `offline` among them,
+# are registered additions the RFC's own enumeration does not carry.
+PRINTER_FAULTS = {
+    "connecting-to-device": "connecting",
+    "cover-open": "cover open",
+    "door-open": "door open",
+    "marker-supply-empty": "out of ink",
+    "marker-supply-low": "ink low",
+    "media-empty": "out of paper",
+    "media-jam": "paper jam",
+    "media-needed": "out of paper",
+    "offline": "offline",
+    "paused": "paused",
+    "shutdown": "powered off",
+    "timed-out": "not responding",
+    "toner-empty": "out of ink",
+    "toner-low": "ink low",
+}
 
 # Scanners have no equivalent class -- most report vendor-specific -- so they
 # are matched on vendor id. 04c5 is Fujitsu, who make the fi-6130.

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Commit message gate.
 #
-# The same three rules the Casomo repos enforce through commitlint, in plain
+# The same three rules my other repos enforce through commitlint, in plain
 # shell so a Python project does not have to carry npm and husky just to host
 # them. Wire it with:
 #

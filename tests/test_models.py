@@ -5,9 +5,14 @@ from datetime import timedelta
 import pytest
 
 from paperpi.models import (
+    FaultSeverity,
     Peripheral,
     PeripheralKind,
     Peripherals,
+    PrintQueue,
+    QueueConnection,
+    QueueFault,
+    QueueState,
     Readiness,
     Rgb,
 )
@@ -101,3 +106,37 @@ def test_format_size_should_switch_unit_at_each_thousand():
     assert format_size(512) == "512 B"
     assert format_size(2_411_000) == "2.4 MB"
     assert format_size(3_000_000_000) == "3.0 GB"
+
+
+def test_worst_fault_should_rank_by_severity_not_by_position():
+    """IPP does not order state reasons, so the first is an accident.
+
+    A jammed printer that is also low on ink reports both, and the ranking is
+    what stops "ink low" being shown while paper is stuck in the rollers.
+    """
+    queue = PrintQueue(
+        name="q",
+        connection=QueueConnection.USB,
+        state=QueueState.STOPPED,
+        accepting=True,
+        faults=(
+            QueueFault(keyword="marker-supply-low", severity=FaultSeverity.WARNING),
+            QueueFault(keyword="media-jam", severity=FaultSeverity.ERROR),
+            QueueFault(keyword="cover-open", severity=FaultSeverity.REPORT),
+        ),
+    )
+    worst = queue.worst_fault
+    assert worst is not None
+    assert worst.keyword == "media-jam"
+
+
+def test_worst_fault_should_be_none_when_nothing_is_wrong():
+    """An untroubled queue has no fault, rather than a fault meaning none."""
+    queue = PrintQueue(
+        name="q",
+        connection=QueueConnection.USB,
+        state=QueueState.IDLE,
+        accepting=True,
+        faults=(),
+    )
+    assert queue.worst_fault is None

@@ -16,6 +16,12 @@ hat = [
     "lgpio>=0.2.2",
     "st7789>=1.0.1",
 ]
+# Also Pi-only, but a separate extra: the print server is a different concern
+# from the panel, and a box could reasonably have one without the other.
+# Compiles against libcups2-dev, so that must be installed first.
+cups = [
+    "pycups>=2.0",
+]
 
 [project.scripts]
 paperpi = "paperpi.__main__:main"
@@ -62,6 +68,9 @@ select = [
 # libraries nor pygame installed.
 "paperpi/adapters/hat.py" = ["PLC0415"]
 "paperpi/adapters/preview.py" = ["PLC0415"]
+# Same reason: pycups is absent on a development machine, and this module has
+# to stay importable there so the status adapter can fall back to "no queue".
+"paperpi/adapters/printer_cups.py" = ["PLC0415"]
 # The composition root picks one adapter pair at runtime; importing both at
 # module scope would require every machine to have every backend installed.
 "paperpi/__main__.py" = ["PLC0415"]

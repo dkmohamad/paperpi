@@ -1,13 +1,16 @@
 """Reading the machine's real state, cheaply enough to poll.
 
-Everything here is a filesystem read. The status source is sampled every couple
-of seconds from inside the render loop, so shelling out to `scanimage -L` or
-`lpstat` would stall the display for as long as those take to answer. USB
-presence is visible in sysfs, which costs nothing.
+Sampled every couple of seconds from inside the render loop, so nothing here
+may block. USB presence and temperature are sysfs reads, which cost nothing.
+The print queue is the one reading that leaves the filesystem, and it arrives
+through an injected port rather than being reached for here -- so a test needs
+no print server, and the composition root stays the only place that picks an
+adapter. Why that port is spoken over IPP rather than by running `lpstat` is
+argued where the decision was made, in `printer_cups`.
 
-The consequence is that this reports what is *attached*, not what is *driveable*.
-That is the honest answer until the SANE and CUPS layers exist, and it is why a
-detected scanner still reports as absent-of-driver rather than ready.
+Where a layer is genuinely missing, the report says so instead of guessing. No
+SANE backend exists yet, so a detected scanner reports as attached-without-a-
+driver rather than ready -- a claim the first scan would disprove.
 """
 
 import shutil
@@ -22,10 +25,14 @@ from ..models import (
     Peripheral,
     PeripheralKind,
     Peripherals,
+    PrintQueue,
+    QueueConnection,
+    QueueState,
     Readiness,
     Storage,
     SystemStatus,
 )
+from ..ports import PrintQueues
 
 __all__ = ["LinuxStatus", "current_address"]
 
@@ -70,11 +77,13 @@ class LinuxStatus:
         self,
         *,
         scan_dir: Path,
+        queues: PrintQueues,
         sys_usb: Path = _SYS_USB,
         sys_net: Path = _SYS_NET,
         thermal: Path = _THERMAL,
     ):
         self._scan_dir = scan_dir
+        self._queues = queues
         self._sys_usb = sys_usb
         self._sys_net = sys_net
         self._thermal = thermal
@@ -163,21 +172,54 @@ class LinuxStatus:
         )
 
     def _printer(self, devices: list[_UsbDevice]) -> Peripheral:
+        """Compose USB presence with the print queue's own view.
+
+        Both halves are needed. The queue alone cannot tell a printer that is
+        merely idle from one that has been unplugged, because CUPS does not
+        notice until it tries to print; USB alone cannot tell configured from
+        unconfigured. Together they cover every state the row can be in.
+        """
+        attached = self._attached_printer(devices)
+        queue = self._usb_queue()
+
+        if queue is None:
+            if attached is None:
+                return _printer_row(Readiness.ABSENT, "no device")
+            return _printer_row(Readiness.UNCONFIGURED, f"{attached} · no queue")
+
+        # The display names the hardware it is driving; the queue name is what
+        # the network advertises and is shown to clients, not here.
+        if attached is None:
+            return _printer_row(Readiness.ERROR, "unplugged")
+        # Stopped is checked before rejecting, because a queue can be both --
+        # someone runs `cupsreject` on a jammed printer -- and "paper jam" is
+        # the sentence that tells the room what to do about it.
+        if queue.state is QueueState.STOPPED:
+            return _printer_row(Readiness.ERROR, f"{attached} · {_fault(queue)}")
+        if not queue.accepting:
+            return _printer_row(Readiness.ERROR, f"{attached} · not accepting")
+        if queue.state is QueueState.PRINTING:
+            return _printer_row(Readiness.BUSY, f"{attached} · printing")
+        return _printer_row(Readiness.READY, f"{attached} · idle")
+
+    def _attached_printer(self, devices: list[_UsbDevice]) -> str | None:
+        """Name the USB-attached printer, or None if there is not one."""
         for device in devices:
             if config.PRINTER_INTERFACE_CLASS in device.interface_classes:
-                name = device.name or "usb printer"
-                # Retire this branch once CUPS is installed and a queue can be
-                # inspected instead of inferred from the USB class.
-                return Peripheral(
-                    kind=PeripheralKind.PRINTER,
-                    readiness=Readiness.UNCONFIGURED,
-                    detail=f"{name} · no queue",
-                )
-        return Peripheral(
-            kind=PeripheralKind.PRINTER,
-            readiness=Readiness.ABSENT,
-            detail="no device",
-        )
+                return _model(device.name) or "usb printer"
+        return None
+
+    def _usb_queue(self) -> PrintQueue | None:
+        """The queue driving the directly-attached printer, if one exists.
+
+        Matched on how the queue connects rather than taken as "the first
+        queue", so adding a second queue for a printer in another room cannot
+        make this row report on the wrong device.
+        """
+        for queue in self._queues():
+            if queue.connection is QueueConnection.USB:
+                return queue
+        return None
 
     def _storage_peripheral(self) -> Peripheral:
         storage = self._storage()
@@ -222,6 +264,35 @@ class LinuxStatus:
 
 
 # --- private ---------------------------------------------------------------
+
+
+def _model(name: str) -> str:
+    """Trim a USB product string down to the part that identifies the device.
+
+    Vendors append a family word -- "ET-2810 Series", "MFC-L2710DW Series" --
+    which is marketing rather than model and costs a third of the width of a
+    320-pixel row. Dropping it is what lets the fault beside it stay readable
+    instead of being truncated away.
+    """
+    return name.removesuffix(" Series").strip()
+
+
+def _printer_row(readiness: Readiness, detail: str) -> Peripheral:
+    """Build a printer peripheral, since every branch above returns one."""
+    return Peripheral(kind=PeripheralKind.PRINTER, readiness=readiness, detail=detail)
+
+
+def _fault(queue: PrintQueue) -> str:
+    """Say why a queue is stopped, in words rather than IPP keywords.
+
+    An unmapped keyword is shown as-is: a fault nobody has written wording for
+    is still a fault, and hiding it would make the row claim less than it
+    knows.
+    """
+    worst = queue.worst_fault
+    if worst is None:
+        return "stopped"
+    return config.PRINTER_FAULTS.get(worst.keyword, worst.keyword)
 
 
 def _read(path: Path) -> str | None:

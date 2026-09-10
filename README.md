@@ -4,6 +4,7 @@ Status display and scan control for the headless Raspberry Pi that serves the
 home scanner and printer. Runs on a Pi 4 with a Pimoroni Display HAT Mini.
 
 The card build that produced the Pi is in [`provisioning/`](provisioning/).
+What is still outstanding is in [`TODO.md`](TODO.md).
 
 ## Background
 
@@ -20,6 +21,14 @@ later changes one module and nothing else.
 is an ST7789 on SPI, and a frame is 320×240×2 bytes pushed down `/dev/spidev0.1`.
 So drawing decomposes into producing an image and pushing it somewhere — which
 is why the same screens render to a desktop window unchanged.
+
+**The printer is not natively discoverable, despite being on the wifi.** Asked
+directly over IPP it reports no `urf-supported` attribute at all, and iOS keys
+AirPrint discovery on exactly that. So it could never appear on an iPhone or
+iPad however it was paired. Android's Mopria uses PWG Raster, which the printer
+does support, which is why this presented as an iOS-only problem. CUPS
+synthesises the missing attribute for any queue it drives — so the queue on the
+Pi advertises what the printer itself cannot.
 
 **Progress is a count, not a percentage.** A sheet feeder does not know how many
 pages it holds until the hopper empties, so "page 7, back side" is what we can
@@ -64,14 +73,14 @@ uv run ruff check && uv run ruff format --check && uv run pyright && uv run pyte
 ```
 
 **Deploy to the Pi.** One-off, on the Pi: install `uv`, and the build tooling
-`lgpio` needs. There is no aarch64 wheel for it, so it compiles from source and
-wants swig plus the shared library — without these `uv sync` fails with
-`command 'swig' failed` and then `cannot find -llgpio`.
+the compiled dependencies need. Neither `lgpio` nor `pycups` has an aarch64
+wheel, so both build from source — without these `uv sync` fails with
+`command 'swig' failed`, then `cannot find -llgpio`, then a missing `cups.h`.
 
 ```sh
 ssh admin@paperpi.local 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ssh admin@paperpi.local 'sudo apt-get update &&
-  sudo apt-get install -y swig python3-dev liblgpio-dev'
+  sudo apt-get install -y swig python3-dev liblgpio-dev libcups2-dev'
 ```
 
 Then each deploy:
@@ -79,14 +88,20 @@ Then each deploy:
 ```sh
 rsync -a --delete --exclude .venv --exclude provisioning \
   ~/dev/paperpi/ admin@paperpi.local:~/paperpi/
-ssh admin@paperpi.local 'cd paperpi && uv sync --extra hat --no-dev'
-ssh admin@paperpi.local 'sudo install -m 644 \
-  ~/paperpi/systemd/paperpi.service /etc/systemd/system/ &&
-  sudo systemctl daemon-reload && sudo systemctl enable --now paperpi'
+ssh admin@paperpi.local 'cd paperpi && uv sync --extra hat --extra cups --no-dev'
+ssh admin@paperpi.local 'sudo install -m 644 ~/paperpi/systemd/*.service \
+  ~/paperpi/systemd/*.timer /etc/systemd/system/ &&
+  sudo systemctl daemon-reload &&
+  sudo systemctl enable --now paperpi paperpi-retention.timer'
 ```
 
-The `hat` extra carries the Pi-only dependencies, which is why `uv sync` on a
-desktop does not try to build them.
+All the units, not just `paperpi.service` — the retention timer is one of them,
+and installing only the service is how a box ends up quietly never tidying up.
+
+The `hat` and `cups` extras carry the Pi-only dependencies, which is why
+`uv sync` on a desktop does not try to build them. They are separate because
+the panel and the print server are separate concerns: a box could reasonably
+have one and not the other.
 
 Optional: add `spidev.bufsiz=65536` to `/boot/firmware/cmdline.txt` and reboot.
 The default is 4096, so each 153,600-byte frame is chunked into 38 writes; this
@@ -94,7 +109,7 @@ cuts it to three.
 
 ### Storage and the scan share
 
-Scans are written to `/mnt/scans`, an exFAT USB drive mounted by UUID:
+Scans are written to `/mnt/scans`, an exFAT USB drive matched by label:
 
 ```
 LABEL=share  /mnt/scans  exfat
@@ -155,6 +170,107 @@ The page is entirely self-contained — inline CSS, no JavaScript, no webfont, n
 CDN. The person opening it is usually standing beside the scanner on the house
 wifi, which is precisely where a phone may have no route to the internet.
 
+### Printing
+
+**The printer appears as `paperpi`** on any phone, tablet or laptop on the LAN —
+no app, no account, no pairing. CUPS drives the Epson over USB and advertises
+the queue over DNS-SD, which is what AirPrint and Mopria both discover. Setup,
+once:
+
+```sh
+sudo apt-get install -y --no-install-recommends \
+    cups printer-driver-escpr cups-ipp-utils avahi-utils libpaper-utils
+sudo paperconfig -p a4
+sudo systemctl enable --now cups.service
+
+# Read both URIs off the machine rather than typing them.
+device=$(sudo lpinfo -v | awk '/usb:\/\/EPSON/ {print $2}')
+driver=$(sudo lpinfo -m | awk '/Epson-ET-2810_Series/ {print $1}')
+sudo lpadmin -p paperpi -D paperpi -L home -v "$device" -m "$driver" \
+    -o printer-is-shared=true -E
+sudo lpadmin -d paperpi
+sudo cupsctl --share-printers
+sudo systemctl restart cups
+```
+
+Six things here are not obvious, and five of them cost an afternoon each if got
+wrong:
+
+- **`--no-install-recommends` is about correctness, not disk space.** The
+  recommends include `cups-browsed`, which discovers *remote* queues and creates
+  local ones — the opposite of what is wanted, and a known source of phantom
+  duplicates — and the whole SANE stack, which should not arrive as a side
+  effect of installing a printer.
+- **`paperconfig -p a4` is not optional.** There is no `/etc/papersize` on a
+  fresh image, and CUPS derives `media-ready` from libpaper. iOS reads
+  `media-ready` to choose paper, so if it resolves to Letter then A4 jobs print
+  scaled or clipped, and it looks like a driver fault.
+- **`cups.service` must be enabled, not merely `cups.socket`.** The socket unit
+  listens only on the UNIX socket, and cupsd idle-exits after 60 s when nothing
+  is shared — so nothing would be left to wake it over the network.
+- **`cupsctl --share-printers` is the whole of the sharing config.** It rewrites
+  `Listen localhost:631` to `Port 631`, puts `Allow @LOCAL` in `<Location />`,
+  and sets `Browsing On`, while leaving `<Location /admin>` alone — which is
+  what keeps administration on localhost. Editing `cupsd.conf` by hand is both
+  unnecessary and fragile in the other direction: `cupsctl` and the web UI
+  rewrite that file, so a hand edit can be silently reverted.
+- **The driver URI must be copied exactly.** Debian's `printer-driver-escpr`
+  ships no `.ppd` files at all; they are generated on demand by a driver
+  enumerator, so a stray character produces the thoroughly misleading
+  `Missing PPD-Adobe-4.x header on line 0`. Hence reading it with `awk` above.
+- **`usblp` is deliberately left loaded.** It holds the printer as
+  `/dev/usb/lp0`, and CUPS's libusb backend detaches and re-attaches it around
+  each job. Blacklisting it is pre-libusb advice that would only break other
+  tooling.
+
+Verify the advert rather than trusting it — this is the part that decides
+whether an iPhone will offer the printer at all:
+
+```sh
+ipptool -tv ipp://localhost/printers/paperpi \
+    /usr/share/cups/ipptool/get-printer-attributes.test | grep -i urf-supported
+avahi-browse -rt _ipp._tcp
+```
+
+`URF=` must be non-empty, `pdl=` must contain both `application/pdf` and
+`image/urf`, and `media-ready` must contain A4.
+
+Administration is localhost-only by design, so reach the web UI over a tunnel:
+
+```sh
+ssh -L 6310:localhost:631 admin@paperpi.local   # then http://localhost:6310/
+```
+
+`lpadmin` warns that printer drivers are deprecated and will stop working in a
+future CUPS. That is a CUPS 3.x change rather than a trixie one, and it will
+need revisiting then, most likely as a Printer Application instead of a PPD.
+
+### If a device cannot see the box
+
+Check which wifi it is on first. The house has two routers on separate subnets,
+and only one of them is the network the Pi is wired to. A device joined to the
+other cannot reach the Pi at all — not the scans page, not the QR link, not the
+print queue.
+
+The Pi itself deliberately holds **one** address, over ethernet. It briefly had
+two, one per router, and that is worse than it sounds: a host on two subnets
+advertises both over mDNS, so a phone can resolve `paperpi.local` and be handed
+the address it cannot reach. Everything then works from some devices and not
+others, intermittently, which is the most expensive kind of broken.
+
+**There is deliberately no wifi fallback**, and it is worth saying why so it is
+not helpfully added back. The Pi is wired to the router it sits beside, so a
+fallback would have to join *that same router* — meaning it covers nothing the
+cable does not already cover except the cable itself, the Pi's ethernet port, or
+one LAN port failing. All three are physical faults on a stationary box in a
+room you can walk into, and the recovery path for those is a keyboard on the
+console, which needs no network at all.
+
+Against that it would cost a stored Wi-Fi PSK on a machine that is trying to
+hold fewer secrets, and it would put the second address back within one
+misconfiguration of returning. A radio that cannot associate with anything is
+the simpler machine.
+
 ### Retention
 
 `paperpi-retention.timer` runs daily and removes scans older than 90 days,
@@ -183,8 +299,9 @@ callbacks rather than being polled.
 
 ## Architecture
 
-Three ports, each with a real implementation and a development one. The screens
-are pure — state in, image out — so they are tested with no hardware at all.
+Every collaborator outside the process is a port with a real implementation
+and a development one, chosen in one place. The screens are pure — state in,
+image out — so they are tested with no hardware at all.
 
 ```
    ButtonEvent                    SystemStatus / ScanEvent
@@ -208,14 +325,15 @@ are pure — state in, image out — so they are tested with no hardware at all.
 
 | Module | Holds |
 |---|---|
-| `models.py` | The vocabulary: readiness, scan events, colours |
-| `ports.py` | IO contracts — Display, Buttons, StartScan, StatusSource |
+| `models.py` | The vocabulary: readiness, scan events, print queues, colours |
+| `ports.py` | IO contracts — Display, Buttons, StartScan, StatusSource, PrintQueues |
 | `protocols.py` | The Screen contract |
 | `app.py` | The render loop |
 | `screens/` | One module per view |
 | `render/` | Canvas, fonts, QR — no hardware |
 | `adapters/` | Real and stand-in implementations |
 | `serve.py` | Read-only HTTP file server behind the QR |
+| `retention.py` | The 90-day sweep, built on `serve.scans_in` |
 
 The font ships inside the package rather than coming from the system, so the
 desktop preview renders identically to the Pi — which has no fonts installed at
@@ -223,8 +341,12 @@ all.
 
 ## Next
 
-Per the Notion build: the real SANE adapter once the fi-6130 arrives, CUPS with
-AirPrint for the Epson, the Samba share on the pen drive, and 90-day retention.
-Each plugs into the ports already here. Peripheral detection is honest today —
-it reports what is attached, not what is driveable — so as each layer lands the
-display lights up without changes to the screens.
+The real SANE adapter, once the scanner arrives. It implements `StartScan` and
+`ScanHandle` alongside the fake rather than replacing it, so the fake stays
+useful for development and for tests. Everything downstream of it is already
+real: the PDF, the HTTP server, the QR and retention.
+
+Peripheral detection stays honest — it reports what is attached and, separately,
+what can actually be driven, never treating one as evidence of the other. That
+is why the printer row moved from `no queue` to `ready` the moment CUPS could
+answer for it, without a line changing in any screen.

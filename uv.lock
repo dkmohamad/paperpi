@@ -172,6 +172,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cups = [
+    { name = "pycups" },
+]
 hat = [
     { name = "gpiozero" },
     { name = "lgpio" },
@@ -191,10 +194,11 @@ requires-dist = [
     { name = "gpiozero", marker = "extra == 'hat'", specifier = ">=2.0" },
     { name = "lgpio", marker = "extra == 'hat'", specifier = ">=0.2.2" },
     { name = "pillow", specifier = ">=11.0" },
+    { name = "pycups", marker = "extra == 'cups'", specifier = ">=2.0" },
     { name = "qrcode", specifier = ">=8.0" },
     { name = "st7789", marker = "extra == 'hat'", specifier = ">=1.0.1" },
 ]
-provides-extras = ["hat"]
+provides-extras = ["hat", "cups"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -274,6 +278,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
 ]
+
+[[package]]
+name = "pycups"
+version = "2.0.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/96/c4/b077f0422cd031e4f3a47c75ce0bcf77f2f2e5bf3648f6945a4d09fd44a5/pycups-2.0.4.tar.gz", hash = "sha256:843e385c1dbf694996ca84ef02a7f30c28376035588f5fbeacd6bae005cf7c8d", size = 65105, upload-time = "2024-04-18T06:20:40.589Z" }
 
 [[package]]
 name = "pygame"

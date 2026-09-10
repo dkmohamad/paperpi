@@ -13,11 +13,12 @@ from typing import Protocol
 
 from PIL.Image import Image
 
-from .models import Button, Rgb, ScanEvent, SystemStatus
+from .models import Button, PrintQueue, Rgb, ScanEvent, SystemStatus
 
 __all__ = [
     "Buttons",
     "Display",
+    "PrintQueues",
     "ScanHandle",
     "StartScan",
     "StatusSource",
@@ -25,6 +26,11 @@ __all__ = [
 
 # Sampling the system's state is one operation with no lifecycle of its own.
 type StatusSource = Callable[[], SystemStatus]
+
+# Listing the configured print queues is likewise one operation. Separate from
+# StatusSource because it is the one reading that leaves the filesystem -- it
+# asks the print server -- so it is injected and can be faked without one.
+type PrintQueues = Callable[[], Sequence[PrintQueue]]
 
 
 class ScanHandle(Protocol):
