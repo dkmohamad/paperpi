@@ -19,5 +19,11 @@
 # even when no drive is present, so `is_mount()` returns true and the display
 # would report removable storage that is not there. Preferring a rule that
 # keeps the mount state honest over one that makes the status lie.
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="FAE7-EBB9", \
+# Matched on the label, not the UUID, and fstab matches the same way. A UUID is
+# unique but disposable -- reformatting the drive or swapping in a replacement
+# changes it, and both the rule and the fstab entry would then silently stop
+# matching with no error anywhere. The label is ours to set, so "the drive
+# labelled share" is the contract, and a replacement prepared the same way just
+# works.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="share", \
   RUN+="/usr/bin/systemctl --no-block start mnt-scans.mount"

@@ -97,9 +97,26 @@ cuts it to three.
 Scans are written to `/mnt/scans`, an exFAT USB drive mounted by UUID:
 
 ```
-UUID=<uuid>  /mnt/scans  exfat
+LABEL=share  /mnt/scans  exfat
   defaults,nofail,uid=1000,gid=1000,umask=0022,x-systemd.device-timeout=10  0  0
 ```
+
+Matched on the label rather than the UUID, and `99-paperpi-scans-mount.rules`
+matches the same way. A UUID is unique but disposable: reformat the drive or
+swap in a replacement and both the fstab entry and the rule silently stop
+matching, with no error anywhere. The label is ours to set, so "the drive
+labelled `share`" is the contract and a replacement prepared the same way works.
+
+A plain fstab entry only mounts once, at boot. If the drive drops off the bus --
+a nudged connector, a bus reset when something else is plugged into the same hub
+-- systemd unmounts it and never brings it back, so scans would quietly start
+landing on the SD card. The udev rule starts the mount unit whenever a matching
+device appears, which closes that.
+
+`x-systemd.automount` would also recover, and is deliberately not used: with no
+drive attached it leaves an autofs mount in place, so writes fail outright
+rather than falling back to the SD card, and `is_mount()` reports storage that
+is not there. Degraded and honest beats broken.
 
 `nofail` is not optional on a headless box: without it, a drive that is missing
 or failing drops the boot into an emergency shell nobody can reach. The device
