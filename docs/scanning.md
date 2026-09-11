@@ -89,9 +89,22 @@ off this unit, not out of a manual.
 
 ## The lamp, and why the panel does not keep asking
 
-The scanner drops into power save after fifteen minutes idle and the scanning
-lamp goes out. What brings it back, per the operator's guide, is loading paper,
-pressing a button on it — or "a command from the scanner driver".
+The scanner drops into power save after fifteen minutes idle. What brings it
+back, per the operator's guide, is loading paper, pressing a button on it — or
+"a command from the scanner driver".
+
+**The scanning lamp does not go out**, which is worth knowing before someone
+reports it as a fault. Power save is visible on the operator panel instead: the
+Function Number Display — the single green digit on the right-hand side — goes
+dark, while the green power LED stays lit. Both of those are documented; the
+lamp is not mentioned anywhere in the guide. Verified on this unit: the display
+was out, and pressing Function lit it again.
+
+Fujitsu never wrote down what the lamp does, but the numbers say it cannot be at
+full brightness — 38 W operating against under 6.2 W asleep, with two cold
+cathode tubes to account for — and the SANE backend's maintainer describes this
+family's sleep as "lamp at half brightness". So a lit lamp on an idle scanner is
+this machine working correctly.
 
 That last one includes listing SANE devices, which is exactly what the status
 row does to learn whether the scanner is driveable. So the probe asks **once**
@@ -111,7 +124,8 @@ can measure or fix.
 ## If SANE stops seeing the scanner
 
 Power it off and on — hold the power button for two seconds, then press it
-again. A USB-level reset is not enough: unbinding and rebinding the device, or
+again. The panel notices within a couple of seconds and returns to READY on its
+own; nothing needs restarting. A USB-level reset is not enough: unbinding and rebinding the device, or
 toggling its `authorized` flag, leaves it enumerated on the bus but in a state
 libusb cannot open, and `scanimage -L` then finds nothing even as root. Only a
 real power cycle re-initialises it.
