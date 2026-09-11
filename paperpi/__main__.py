@@ -16,7 +16,15 @@ from .adapters.printer_cups import CupsQueues
 from .adapters.scan_fake import FakeScanner
 from .adapters.scan_sane import SaneScanner, find_device
 from .adapters.status_linux import LinuxStatus, current_address
-from .models import PageScanned, ScanEvent, ScanFinished, ScanId, ScanStarted, Side
+from .models import (
+    PageScanned,
+    ScanEvent,
+    ScanFinished,
+    ScanId,
+    ScannerLookup,
+    ScanStarted,
+    Side,
+)
 from .ports import Buttons, Display
 from .protocols import Screen
 from .render.canvas import Canvas, Fonts
@@ -175,7 +183,9 @@ def _sample_screens(library: ScanLibrary, hostname: str) -> dict[str, Screen]:
     # for a live print server to do it would make the output depend on the
     # machine it ran on.
     status = LinuxStatus(
-        scan_dir=library.directory, queues=lambda: (), scanner=lambda: None
+        scan_dir=library.directory,
+        queues=lambda: (),
+        scanner=lambda: ScannerLookup(installed=False),
     )
     home = StatusScreen(
         status=status,

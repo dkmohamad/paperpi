@@ -87,4 +87,33 @@ authority on what to put in `config.py` — the option spellings there were read
 off this unit, not out of a manual.
 
 
+## The lamp, and why the panel does not keep asking
+
+The scanner drops into power save after fifteen minutes idle and the scanning
+lamp goes out. What brings it back, per the operator's guide, is loading paper,
+pressing a button on it — or "a command from the scanner driver".
+
+That last one includes listing SANE devices, which is exactly what the status
+row does to learn whether the scanner is driveable. So the probe asks **once**
+when the scanner appears and then stops. When it cannot find one it retries, but
+on a doubling backoff that climbs past the fifteen-minute power-save window, so
+a scanner we cannot reach recovers quickly from a start-up race and is otherwise
+left alone.
+
+This is a hardware concern, not a performance one. The lamp is a cold-cathode
+tube — the manual's safety section warns it contains mercury — and it has a
+finite life. It is not in the consumables table, which lists only the pick and
+brake rollers (200,000 sheets or one year, with counters on the scanner). So
+there is no way to read how much lamp life is left and no user-serviceable way
+to replace it. A probe loop that held it lit would be wearing out a part nobody
+can measure or fix.
+
+## If SANE stops seeing the scanner
+
+Power it off and on — hold the power button for two seconds, then press it
+again. A USB-level reset is not enough: unbinding and rebinding the device, or
+toggling its `authorized` flag, leaves it enumerated on the bus but in a state
+libusb cannot open, and `scanimage -L` then finds nothing even as root. Only a
+real power cycle re-initialises it.
+
 Back to the [README](../README.md).

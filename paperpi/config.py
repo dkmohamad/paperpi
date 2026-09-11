@@ -32,6 +32,7 @@ __all__ = [
     "SCANNER_BACKEND",
     "SCANNER_END_OF_FEED",
     "SCANNER_FAULTS",
+    "SCANNER_USB_MODELS",
     "SCANNER_USB_VENDORS",
     "SCAN_DIR",
     "SCAN_MODE",
@@ -183,6 +184,15 @@ PRINTER_FAULTS = {
 # are matched on vendor id. 04c5 is Fujitsu, who make the fi-6130.
 # Source: USB-IF vendor ID registry, https://www.usb.org/sites/default/files/vendor_ids.pdf
 SCANNER_USB_VENDORS = {"04c5": "Fujitsu"}
+
+# And by vendor:product where the model is known, because this scanner reports
+# empty USB product strings -- so a scanner that is attached but not answering
+# could otherwise only be called "Fujitsu device", which is both vague and too
+# wide for the row once a fault is named beside it. The backend gives a better
+# name when it can be reached; this is what to say when it cannot.
+# Source: the USB id reported by the device itself, cross-checked against
+# udev's hardware database, which names 04c5:114f as the fi-6130.
+SCANNER_USB_MODELS = {"04c5:114f": "fi-6130"}
 
 BACKGROUND = Rgb.from_hex("#0b0f14")
 TEXT = Rgb.from_hex("#e6edf3")

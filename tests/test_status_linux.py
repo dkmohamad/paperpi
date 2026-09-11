@@ -24,7 +24,13 @@ from paperpi.models import (
     QueueFault,
     QueueState,
     Readiness,
+    ScannerLookup,
 )
+
+
+def _lookup(device: str | None) -> ScannerLookup:
+    """A lookup from a device name, or an installed-but-silent one from None."""
+    return ScannerLookup(installed=True, device=device or "")
 
 
 def _fault(keyword: str, severity: FaultSeverity = FaultSeverity.ERROR) -> QueueFault:
@@ -68,6 +74,7 @@ def _status(
     scan_dir: Path,
     queues: Sequence[PrintQueue] = (),
     scanner: str | None = None,
+    installed: bool = True,
 ) -> LinuxStatus:
     usb = tmp_path / "usb"
     net = tmp_path / "net"
@@ -80,7 +87,7 @@ def _status(
     return LinuxStatus(
         scan_dir=scan_dir,
         queues=lambda: queues,
-        scanner=lambda: scanner,
+        scanner=lambda: ScannerLookup(installed=installed, device=scanner or ""),
         sys_usb=usb,
         sys_net=net,
         thermal=thermal,
@@ -105,21 +112,21 @@ def test_scanner_should_be_absent_when_no_matching_vendor_is_attached(
     assert scanner.readiness is Readiness.ABSENT
 
 
-def test_scanner_should_be_unconfigured_when_attached_without_a_driver(
+def test_scanner_should_be_unconfigured_when_there_is_no_scanning_software(
     tmp_path: Path, scan_dir: Path
 ):
-    """A Fujitsu device present but undriveable is unconfigured, not ready.
+    """Nothing installed to drive it: a setup task, not a fault.
 
-    Claiming READY on USB presence alone would be a lie the first scan
-    disproves; UNCONFIGURED says attached-but-not-usable, which is the actual
-    state until SANE is installed.
+    This is the one case where "no driver" is the truthful thing to say, and
+    it is why the lookup reports whether there was anything to ask rather than
+    just whether it found something.
     """
-    status = _status(tmp_path, scan_dir)
+    status = _status(tmp_path, scan_dir, installed=False)
     # 04c5 is Fujitsu's USB-IF vendor id, per the registry cited in config.
     _usb_device(tmp_path / "usb", "1-1", "04c5", "132e", "fi-6130", ["ff"])
     scanner = _peripheral(status, PeripheralKind.SCANNER)
     assert scanner.readiness is Readiness.UNCONFIGURED
-    assert "fi-6130" in scanner.detail
+    assert "no driver" in scanner.detail
 
 
 def test_printer_should_be_detected_by_its_usb_interface_class(
@@ -272,7 +279,7 @@ def test_temperature_should_be_none_when_unreadable(tmp_path: Path, scan_dir: Pa
     status = LinuxStatus(
         scan_dir=scan_dir,
         queues=lambda: (),
-        scanner=lambda: None,
+        scanner=lambda: ScannerLookup(installed=True),
         sys_usb=tmp_path / "usb",
         sys_net=tmp_path / "net",
         thermal=tmp_path / "absent",
@@ -295,7 +302,7 @@ def test_network_should_name_the_first_interface_that_is_up(
     status = LinuxStatus(
         scan_dir=scan_dir,
         queues=lambda: (),
-        scanner=lambda: None,
+        scanner=lambda: ScannerLookup(installed=True),
         sys_usb=tmp_path / "usb",
         sys_net=net,
         thermal=tmp_path / "absent",
@@ -308,7 +315,7 @@ def test_storage_should_be_absent_when_the_scan_directory_is_missing(tmp_path: P
     status = LinuxStatus(
         scan_dir=tmp_path / "nowhere",
         queues=lambda: (),
-        scanner=lambda: None,
+        scanner=lambda: ScannerLookup(installed=True),
         sys_usb=tmp_path / "usb",
         sys_net=tmp_path / "net",
         thermal=tmp_path / "absent",
@@ -402,15 +409,20 @@ def test_scanner_should_be_ready_when_the_backend_can_see_it(
     assert scanner.detail == "fi-6130dj"
 
 
-def test_scanner_attached_without_a_backend_stays_unconfigured(
+def test_a_scanner_that_does_not_answer_is_a_fault_not_a_setup_task(
     tmp_path: Path, scan_dir: Path
 ):
-    """On the bus but undriveable is a setup task, not a fault or a readiness."""
+    """Software present, scanner silent: the cable or the power, not the driver.
+
+    Reporting "no driver" here sends someone to install something that is
+    already installed. The distinction was added because the panel said exactly
+    that while SANE was installed and working.
+    """
     status = _status(tmp_path, scan_dir, scanner=None)
     _usb_device(tmp_path / "usb", "1-1", "04c5", "114f", "", ["ff"])
     scanner = _peripheral(status, PeripheralKind.SCANNER)
-    assert scanner.readiness is Readiness.UNCONFIGURED
-    assert "no driver" in scanner.detail
+    assert scanner.readiness is Readiness.ERROR
+    assert "not responding" in scanner.detail
 
 
 def test_the_backend_should_be_asked_once_while_the_scanner_stays_put(
@@ -424,10 +436,10 @@ def test_the_backend_should_be_asked_once_while_the_scanner_stays_put(
     """
     asked = 0
 
-    def find() -> str | None:
+    def find() -> ScannerLookup:
         nonlocal asked
         asked += 1
-        return "fujitsu:fi-6130dj:000000"
+        return _lookup("fujitsu:fi-6130dj:000000")
 
     usb = tmp_path / "usb"
     usb.mkdir(exist_ok=True)
@@ -468,7 +480,7 @@ def test_unplugging_should_make_the_backend_worth_asking_again(
     status = LinuxStatus(
         scan_dir=scan_dir,
         queues=lambda: (),
-        scanner=lambda: next(answers, None),
+        scanner=lambda: _lookup(next(answers, None)),
         sys_usb=usb,
         sys_net=net,
         thermal=tmp_path / "absent",
@@ -486,3 +498,65 @@ def test_unplugging_should_make_the_backend_worth_asking_again(
     # A different unit plugged in is found, not remembered wrongly.
     _usb_device(usb, "1-2", "04c5", "114f", "", ["ff"])
     assert "second" in _peripheral(status, PeripheralKind.SCANNER).detail
+
+
+def test_a_scanner_switched_off_and_on_should_come_back(tmp_path: Path, scan_dir: Path):
+    """The lookup is asynchronous, so the first answer after power-on is "not yet".
+
+    Treating that as settled is how the row ends up reading "no driver" for a
+    scanner sitting right there working -- until somebody restarts the service,
+    which nobody watching the panel would think to do.
+    """
+    answers = iter([None, None, "fujitsu:fi-6130dj:000000"])
+    usb = tmp_path / "usb"
+    usb.mkdir(exist_ok=True)
+    net = tmp_path / "net"
+    net.mkdir(exist_ok=True)
+    (net / "eth0").mkdir(exist_ok=True)
+    (net / "eth0" / "operstate").write_text("up\n")
+    status = LinuxStatus(
+        scan_dir=scan_dir,
+        queues=lambda: (),
+        scanner=lambda: _lookup(next(answers, None)),
+        sys_usb=usb,
+        sys_net=net,
+        thermal=tmp_path / "absent",
+    )
+
+    _usb_device(usb, "1-1", "04c5", "114f", "", ["ff"])
+    # Present, software installed, not answering yet -- a fault, not a
+    # missing driver, which is the distinction the panel got wrong.
+    assert _peripheral(status, PeripheralKind.SCANNER).readiness is Readiness.ERROR
+    assert _peripheral(status, PeripheralKind.SCANNER).readiness is Readiness.ERROR
+    # Then it is, without anything having been restarted.
+    scanner = _peripheral(status, PeripheralKind.SCANNER)
+    assert scanner.readiness is Readiness.READY
+    assert scanner.detail == "fi-6130dj"
+
+
+def test_a_silent_scanner_should_still_be_named(tmp_path: Path, scan_dir: Path):
+    """The model comes from the USB id when the backend cannot supply it.
+
+    This scanner reports empty USB product strings, so the fallback was the
+    maker's name -- which is both vague and, once a fault is named beside it,
+    too wide for the row. Naming it from the id keeps the fault readable, which
+    is when it matters most.
+    """
+    status = _status(tmp_path, scan_dir, scanner=None)
+    _usb_device(tmp_path / "usb", "1-1", "04c5", "114f", "", ["ff"])
+    detail = _peripheral(status, PeripheralKind.SCANNER).detail
+    assert detail.startswith("fi-6130")
+    assert "Fujitsu device" not in detail
+
+
+def test_an_unknown_scanner_should_fall_back_to_its_maker(
+    tmp_path: Path, scan_dir: Path
+):
+    """A model we have no id for is still worth naming as far as we can.
+
+    Matching is on the vendor, so a different Fujitsu scanner is detected; it
+    just cannot be named precisely until someone adds its id.
+    """
+    status = _status(tmp_path, scan_dir, scanner=None)
+    _usb_device(tmp_path / "usb", "1-1", "04c5", "9999", "", ["ff"])
+    assert "Fujitsu" in _peripheral(status, PeripheralKind.SCANNER).detail

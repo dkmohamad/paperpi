@@ -31,7 +31,14 @@ from paperpi.adapters.scan_sane import (
     find_device,
     make_scanner_probe,
 )
-from paperpi.models import PageScanned, ScanFailed, ScanFinished, ScanStarted, Side
+from paperpi.models import (
+    PageScanned,
+    ScanFailed,
+    ScanFinished,
+    ScannerLookup,
+    ScanStarted,
+    Side,
+)
 
 _STARTED = datetime(2026, 9, 11, 15, 30)
 
@@ -295,7 +302,7 @@ def test_find_device_should_pick_the_scanner_not_the_printer():
     listing = (
         "epsonds:libusb:001:003\nfujitsu:fi-6130dj:000000\nepson2:net:192.168.1.199\n"
     )
-    assert find_device(listing=lambda: listing) == "fujitsu:fi-6130dj:000000"
+    assert find_device(listing=lambda: listing).device == "fujitsu:fi-6130dj:000000"
 
 
 def test_find_device_should_report_nothing_rather_than_raise():
@@ -304,13 +311,15 @@ def test_find_device_should_report_nothing_rather_than_raise():
     def refuse() -> str:
         raise OSError("scanimage is not installed")
 
-    assert find_device(listing=refuse) is None
+    found = find_device(listing=refuse)
+    assert found.device == ""
+    assert found.installed is True
 
 
 def test_find_device_should_report_nothing_when_only_others_are_present():
     """An empty answer and a wrong-backend answer mean the same thing here."""
-    assert find_device(listing=lambda: "epsonds:libusb:001:003\n") is None
-    assert find_device(listing=lambda: "") is None
+    assert find_device(listing=lambda: "epsonds:libusb:001:003\n").device == ""
+    assert find_device(listing=lambda: "").device == ""
 
 
 def test_the_pdf_should_be_a4_not_whatever_the_pixels_imply(scan_dir: Path):
@@ -470,20 +479,20 @@ def test_the_probe_should_answer_at_once_and_look_behind_itself():
     """
     looking = threading.Event()
 
-    def slow() -> str | None:
+    def slow() -> ScannerLookup:
         looking.wait(timeout=5)
-        return "fujitsu:fi-6130dj:000000"
+        return ScannerLookup(installed=True, device="fujitsu:fi-6130dj:000000")
 
     probe = make_scanner_probe(find=slow)
     began = time.monotonic()
-    assert probe() is None
+    assert probe().device == ""
     assert time.monotonic() - began < 0.05
 
     looking.set()
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and probe() is None:
+    while time.monotonic() < deadline and not probe().device:
         time.sleep(0.01)
-    assert probe() == "fujitsu:fi-6130dj:000000"
+    assert probe().device == "fujitsu:fi-6130dj:000000"
 
 
 def test_a_failed_look_should_be_retried_not_remembered():
@@ -493,13 +502,16 @@ def test_a_failed_look_should_be_retried_not_remembered():
     that first `None` forever would leave the row reading "no driver" until
     somebody restarted the service.
     """
-    answers = iter([None, "fujitsu:fi-6130dj:000000"])
-    probe = make_scanner_probe(find=lambda: next(answers, None), retry_after=0.0)
+    answers = iter(["", "fujitsu:fi-6130dj:000000"])
+    probe = make_scanner_probe(
+        find=lambda: ScannerLookup(installed=True, device=next(answers, "")),
+        retry_after=0.0,
+    )
 
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and probe() is None:
+    while time.monotonic() < deadline and not probe().device:
         time.sleep(0.01)
-    assert probe() == "fujitsu:fi-6130dj:000000"
+    assert probe().device == "fujitsu:fi-6130dj:000000"
 
 
 def test_a_page_should_be_turned_the_right_way_up(tmp_path: Path):
@@ -544,3 +556,41 @@ def test_pages_should_keep_the_order_the_scanner_fed_them(scan_dir: Path):
     finished = events[-1]
     assert isinstance(finished, ScanFinished)
     assert finished.pages == 4
+
+
+def test_a_failed_look_should_not_be_retried_on_every_call():
+    """Asking wakes the scanner, so asking too often is a hardware cost.
+
+    Listing SANE devices issues a driver command, which the operator's guide
+    lists among the things that bring the scanner out of power save. A probe
+    that retried on every call would hold the scanning lamp lit for as long as
+    the box was running -- and that lamp is a cold-cathode tube with a finite
+    life, no counter, and no place in the manual's consumables table.
+
+    The calls here are spaced rather than tight. A tight loop proves nothing:
+    the in-flight guard alone blocks re-entry, so the test passes with the
+    backoff removed. Only elapsed time between calls exercises it -- which is
+    also what the real caller does, sampling every couple of seconds.
+    """
+    calls = 0
+
+    def count() -> ScannerLookup:
+        nonlocal calls
+        calls += 1
+        return ScannerLookup(installed=True)
+
+    probe = make_scanner_probe(find=count, retry_after=60.0)
+    probe()
+
+    deadline = time.monotonic() + 5
+    while calls == 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert calls == 1, "the first look never happened"
+
+    for _ in range(10):
+        probe()
+        time.sleep(0.05)
+    assert calls == 1, (
+        f"the probe asked {calls} times in half a second; at that rate it would "
+        f"hold the scanning lamp lit indefinitely"
+    )

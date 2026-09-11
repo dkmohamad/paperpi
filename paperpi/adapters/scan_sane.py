@@ -31,6 +31,7 @@ from ..models import (
     PageScanned,
     ScanEvent,
     ScanFailed,
+    ScannerLookup,
     ScanStarted,
     Side,
 )
@@ -50,8 +51,21 @@ logger = logging.getLogger(__name__)
 
 _PROBE_TIMEOUT_SECONDS = 10
 
-# How long to wait before looking for a scanner again, having found none.
-_RETRY_SECONDS = 10.0
+# How long to wait before looking for a scanner again, having found none, and
+# the ceiling that wait backs off to.
+#
+# The ceiling is the important number, and it is a hardware concern rather than
+# a performance one. Listing devices issues a driver command, and the operator's
+# guide lists that among the things that wake the scanner from power save -- so
+# a probe that repeats forever at a fixed interval holds the scanning lamp lit
+# for as long as the box is on. That lamp is a cold-cathode tube: it has a
+# finite life, it is not in the manual's consumables table, and there is no
+# counter for it, so wearing it out is both invisible and not a thing anyone can
+# put right. Backing off past the scanner's own fifteen-minute power-save
+# timeout means a scanner we cannot reach is retried often enough to recover
+# quickly from a start-up race, and rarely enough to let the lamp go out.
+_RETRY_SECONDS = 1.0
+_MAX_RETRY_SECONDS = 20 * 60.0
 
 
 class ScanProcess(Protocol):
@@ -91,8 +105,8 @@ type DeviceListing = Callable[[], str]
 
 def find_device(
     *, listing: DeviceListing | None = None, backend: str = config.SCANNER_BACKEND
-) -> str | None:
-    """Name the attached scanner, or None if SANE cannot see one.
+) -> ScannerLookup:
+    """Ask the scanning software what it can see.
 
     Matched on the backend prefix rather than the full name. The full name
     carries the unit's own identifiers, so pinning one into the source would
@@ -105,19 +119,27 @@ def find_device(
         backend: The backend whose devices count as ours.
 
     Returns:
-        A SANE device name, or None. Never raises: a scanner that cannot be
-        found is a state to report, not a failure to handle.
+        What was found, and whether there was anything to ask. Never raises: a
+        scanner that cannot be found is a state to report, not a failure to
+        handle. The distinction matters -- software that is absent and software
+        that got no answer look the same to the caller otherwise, and only one
+        of them is fixed by installing something.
     """
     read = listing if listing is not None else _device_listing
     try:
         text = read()
+    except FileNotFoundError:
+        # No scanimage on this machine at all, which is every development
+        # machine and any Pi where the install step was skipped.
+        logger.debug("no scanning software installed")
+        return ScannerLookup(installed=False)
     except (OSError, subprocess.SubprocessError):
-        logger.debug("could not list scanners", exc_info=True)
-        return None
+        logger.debug("the scanning software failed to answer", exc_info=True)
+        return ScannerLookup(installed=True)
     for line in text.splitlines():
         if line.startswith(f"{backend}:"):
-            return line.strip()
-    return None
+            return ScannerLookup(installed=True, device=line.strip())
+    return ScannerLookup(installed=True)
 
 
 class SaneScanner:
@@ -201,33 +223,45 @@ class _BackgroundProbe:
         self._find = find
         self._retry_after = retry_after
         self._lock = threading.Lock()
-        self._device: str | None = None
+        self._found: ScannerLookup | None = None
         self._asked_at: float | None = None
         self._running = False
+        self._failures = 0
 
-    def __call__(self) -> str | None:
-        """The device last found, starting a fresh look if one is due."""
+    def __call__(self) -> ScannerLookup:
+        """What was last found, starting a fresh look if one is due."""
         with self._lock:
-            if self._device is None and not self._running and self._due():
+            unresolved = self._found is None or not self._found.device
+            if unresolved and not self._running and self._due():
                 self._running = True
                 threading.Thread(target=self._look, daemon=True).start()
-            return self._device
+            # Before the first look has returned there is nothing to report,
+            # and claiming the software is missing would be a guess.
+            return self._found if self._found is not None else ScannerLookup(True)
 
     def _due(self) -> bool:
+        """Whether enough time has passed to be worth asking again.
+
+        The wait doubles with each failure. A scanner that has just been
+        plugged in is usually reachable within a second or two, so the first
+        retries are quick; one that is not coming back is left alone.
+        """
         if self._asked_at is None:
             return True
-        return time.monotonic() - self._asked_at >= self._retry_after
+        wait = min(self._retry_after * 2**self._failures, _MAX_RETRY_SECONDS)
+        return time.monotonic() - self._asked_at >= wait
 
     def _look(self) -> None:
         try:
             found = self._find()
         except Exception:
             logger.debug("looking for a scanner failed", exc_info=True)
-            found = None
+            found = ScannerLookup(installed=True)
         with self._lock:
-            self._device = found
+            self._found = found
             self._asked_at = time.monotonic()
             self._running = False
+            self._failures = 0 if found.device else self._failures + 1
 
 
 class _SaneScanHandle:
@@ -320,8 +354,8 @@ class _SaneScanHandle:
             self._emit(ScanFailed(message="the scan failed unexpectedly"))
 
     def _scan_into(self, directory: Path) -> None:
-        device = self._device if self._device is not None else self._find()
-        if device is None:
+        device = self._device or self._find().device
+        if not device:
             # Never fall through to SANE's own choice: the printer's flatbed
             # answers SANE too, so "no device" must stop here rather than
             # quietly scan on the wrong machine.

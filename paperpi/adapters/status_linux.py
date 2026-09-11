@@ -31,6 +31,7 @@ from ..models import (
     QueueConnection,
     QueueState,
     Readiness,
+    ScannerLookup,
     Storage,
     SystemStatus,
 )
@@ -165,24 +166,33 @@ class LinuxStatus:
         process, so it runs only when the bus changes rather than every poll.
         """
         attached = self._attached_scanner(devices)
-        device = self._probe.look(present=attached is not None)
+        found = self._probe.look(present=attached is not None)
 
         if attached is None:
             return _scanner_row(Readiness.ABSENT, "no device")
-        if device is None:
+        if not found.installed:
+            # Genuinely nothing to drive it with. A setup task, not a fault.
             return _scanner_row(Readiness.UNCONFIGURED, f"{attached} · no driver")
+        if not found.device:
+            # There is software, and it asked, and the scanner did not answer.
+            # Saying "no driver" here would send someone to install something
+            # that is already installed, when the fix is at the cable or the
+            # power switch.
+            return _scanner_row(Readiness.ERROR, f"{attached} · not responding")
         # Just the model: the readiness column already says "ready", and unlike
         # the printer there is no second state to distinguish here -- a running
         # scan has a screen of its own. The name comes from the backend because
         # USB has none to give; this scanner reports empty product strings.
-        return _scanner_row(Readiness.READY, _model_of(device))
+        return _scanner_row(Readiness.READY, _model_of(found.device))
 
     def _attached_scanner(self, devices: list[_UsbDevice]) -> str | None:
         """Name the USB-attached scanner, or None if there is not one."""
         for device in devices:
-            if device.vendor in config.SCANNER_USB_VENDORS:
-                maker = config.SCANNER_USB_VENDORS[device.vendor]
-                return _model(device.name) or f"{maker} device"
+            if device.vendor not in config.SCANNER_USB_VENDORS:
+                continue
+            known = config.SCANNER_USB_MODELS.get(f"{device.vendor}:{device.product}")
+            maker = config.SCANNER_USB_VENDORS[device.vendor]
+            return known or _model(device.name) or f"{maker} device"
         return None
 
     def _printer(self, devices: list[_UsbDevice]) -> Peripheral:
@@ -303,19 +313,26 @@ class _ScannerProbe:
 
     def __init__(self, find: ScannerDevice):
         self._find = find
-        self._present = False
-        self._device: str | None = None
+        self._found: ScannerLookup | None = None
 
-    def look(self, *, present: bool) -> str | None:
-        """The device name, probing only when the scanner has just appeared."""
+    def look(self, *, present: bool) -> ScannerLookup:
+        """What the software knows, asked for until there is a device to remember.
+
+        Asking stops once there is an answer and resumes the moment the
+        scanner leaves the bus. It deliberately does *not* stop at the first
+        unsuccessful answer: the lookup behind this runs off-thread and reports
+        nothing until it returns, and access to a freshly plugged-in scanner is
+        granted asynchronously too -- so "present but not yet reachable" is the
+        ordinary state for a second or two after power-on, not a conclusion.
+        Caching it would leave the row reading "no driver" until someone
+        restarted the service.
+        """
         if not present:
-            self._present = False
-            self._device = None
-            return None
-        if not self._present:
-            self._present = True
-            self._device = self._find()
-        return self._device
+            self._found = None
+            return ScannerLookup(installed=True)
+        if self._found is None or not self._found.device:
+            self._found = self._find()
+        return self._found
 
 
 def _scanner_row(readiness: Readiness, detail: str) -> Peripheral:

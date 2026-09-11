@@ -13,7 +13,7 @@ from typing import Protocol
 
 from PIL.Image import Image
 
-from .models import Button, PrintQueue, Rgb, ScanEvent, SystemStatus
+from .models import Button, PrintQueue, Rgb, ScanEvent, ScannerLookup, SystemStatus
 
 __all__ = [
     "Buttons",
@@ -33,10 +33,10 @@ type StatusSource = Callable[[], SystemStatus]
 # asks the print server -- so it is injected and can be faked without one.
 type PrintQueues = Callable[[], Sequence[PrintQueue]]
 
-# Naming the attached scanner, or None when the backend cannot see one.
-# Separate from StatusSource because it is expensive: it spawns a process,
-# so whoever holds it decides how often it is worth asking.
-type ScannerDevice = Callable[[], str | None]
+# Asking the scanning software what it can see. Separate from StatusSource
+# because it is expensive -- it spawns a process -- so whoever holds it decides
+# how often it is worth asking.
+type ScannerDevice = Callable[[], ScannerLookup]
 
 
 class ScanHandle(Protocol):

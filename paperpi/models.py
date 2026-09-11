@@ -40,6 +40,7 @@ __all__ = [
     "ScanFinished",
     "ScanId",
     "ScanStarted",
+    "ScannerLookup",
     "Side",
     "Storage",
     "SystemStatus",
@@ -293,6 +294,25 @@ class QueueFault:
 
     keyword: str
     severity: FaultSeverity
+
+
+@dataclass(frozen=True, slots=True)
+class ScannerLookup:
+    """What the scanning software was able to find out.
+
+    Two different answers hide behind "no scanner": there may be no scanning
+    software to ask, or there may be software that asked and got nothing back.
+    The first is a setup task and the second is a fault, and telling someone
+    "no driver" when the driver is installed and the cable is the problem sends
+    them to fix the wrong thing.
+
+    Attributes:
+        installed: Whether there is any scanning software present to ask.
+        device: What it found, or empty when it found nothing.
+    """
+
+    installed: bool
+    device: str = ""
 
 
 @dataclass(frozen=True, slots=True)

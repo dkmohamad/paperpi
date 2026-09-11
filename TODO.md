@@ -22,6 +22,13 @@ something nobody has named.
 
 ## Worth deciding, not yet urgent
 
+- [ ] **Consider whether the scan drive should hold the scratch pages.** They
+      currently land in a temporary directory on `/mnt/scans`, which keeps them
+      off the RAM-backed `/tmp`. It also means an interrupted scan leaves a
+      `.paperpi-scan-*` directory on the removable drive until the next reboot
+      clears it. Harmless, and invisible to the index and to retention, which
+      both match on `*.pdf` only -- but worth a sweep if it ever accumulates.
+
 - [ ] **Serve on port 80 instead of 8080.** One change that improves three
       things at once: the address becomes `http://paperpi.local` with nothing to
       type after it; apps like WhatsApp are far more likely to turn it into a
