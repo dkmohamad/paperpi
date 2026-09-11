@@ -48,19 +48,34 @@ main { max-width: 34rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
 h1 { font-size: 1.4rem; margin: 0 0 .15rem; }
 .count { color: var(--muted); margin: 0 0 1.25rem; font-size: .95rem; }
 ul { list-style: none; margin: 0; padding: 0; }
-li { border-top: 1px solid var(--line); }
+li {
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: stretch;
+}
 li:last-child { border-bottom: 1px solid var(--line); }
-a {
+.open {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 1rem;
+  flex: 1;
+  min-width: 0;
   /* Generous vertical padding: this is a thumb target, not a mouse target. */
   padding: 1rem .25rem;
   text-decoration: none;
   color: inherit;
 }
-a:hover .when, a:focus .when { color: var(--accent); }
+.save {
+  display: flex;
+  align-items: center;
+  /* Its own thumb target, and wide enough that reaching for it does not open
+     the document by accident. */
+  padding: 1rem .5rem 1rem 1rem;
+  color: var(--muted);
+}
+.save:hover, .save:focus { color: var(--accent); }
+.open:hover .when, .open:focus .when { color: var(--accent); }
 .when { font-weight: 600; }
 .size { color: var(--muted); font-size: .9rem; white-space: nowrap; }
 .empty { color: var(--muted); padding: 2rem .25rem; border-top: 1px solid var(--line); }
@@ -71,6 +86,7 @@ footer { color: var(--muted); font-size: .8rem; margin-top: 2rem; }
 def render_index(
     scans: Sequence[Scan],
     path_for: Callable[[ScanId], str],
+    save_path_for: Callable[[ScanId], str],
     now: datetime,
 ) -> str:
     """Render the list of scans as a standalone HTML page.
@@ -79,6 +95,9 @@ def render_index(
         scans: Newest first. Rendered in the order given.
         path_for: Turns a scan id into the path that serves it. Injected rather
             than built here so the URL is defined in exactly one place.
+        save_path_for: The same document as a download. A phone can only share
+            a file, and no response header can make a browser share the page it
+            is displaying -- so getting a scan into another app starts here.
         now: Used to phrase dates relatively. Injected so the output is
             deterministic in a test.
 
@@ -87,7 +106,8 @@ def render_index(
     """
     if scans:
         count = f"{len(scans)} document{'s' if len(scans) != 1 else ''}"
-        body = "<ul>\n" + "\n".join(_row(s, path_for, now) for s in scans) + "\n</ul>"
+        rows = "\n".join(_row(s, path_for, save_path_for, now) for s in scans)
+        body = "<ul>\n" + rows + "\n</ul>"
     else:
         count = "nothing here yet"
         body = (
@@ -118,15 +138,40 @@ def render_index(
 # --- private ---------------------------------------------------------------
 
 
-def _row(scan: Scan, path_for: Callable[[ScanId], str], now: datetime) -> str:
+# A circled down-arrow, drawn inline rather than fetched: the page is opened by
+# someone standing beside the scanner, on wifi that may have no route out, so it
+# carries no external requests of any kind.
+_DOWNLOAD_ICON = (
+    '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" '
+    'fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round">'
+    '<circle cx="12" cy="12" r="9"/>'
+    '<path d="M12 7.5v8"/><path d="M8.5 12l3.5 3.5 3.5-3.5"/>'
+    "</svg>"
+)
+
+
+def _row(
+    scan: Scan,
+    path_for: Callable[[ScanId], str],
+    save_path_for: Callable[[ScanId], str],
+    now: datetime,
+) -> str:
     href = html.escape(path_for(scan.scan_id))
+    save = html.escape(save_path_for(scan.scan_id))
     when = html.escape(_when(scan.modified, now))
     size = html.escape(format_size(scan.size_bytes))
+    # Two sibling links, not one nested in the other: nesting anchors is invalid
+    # and browsers recover from it unevenly, which would leave one untappable.
     return (
-        f'<li><a href="{href}">'
+        "<li>"
+        f'<a class="open" href="{href}">'
         f'<span class="when">{when}</span>'
         f'<span class="size">{size}</span>'
-        "</a></li>"
+        "</a>"
+        f'<a class="save" href="{save}" download '
+        f'aria-label="Download {when}" title="Download">{_DOWNLOAD_ICON}</a>'
+        "</li>"
     )
 
 

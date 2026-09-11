@@ -112,3 +112,39 @@ def test_a_well_formed_id_with_no_file_should_be_not_found(server: Server):
     _, base = server
     status, _, _ = _get(f"{base}/s/deadbeef")
     assert status == 404
+
+
+def test_the_download_route_should_hand_over_the_file(server: Server):
+    """Same document, offered as a file rather than a page."""
+    _, base = server
+
+    status, body, headers = _get(f"{base}/d/a1b2c3d4")
+
+    assert status == 200
+    assert headers["Content-Type"] == "application/pdf"
+    assert headers["Content-Disposition"].startswith("attachment")
+    assert "2026-09-10-1423-a1b2c3d4.pdf" in headers["Content-Disposition"]
+    assert body == _PDF
+
+
+def test_both_routes_should_serve_the_same_bytes(server: Server):
+    """Only the disposition differs.
+
+    A download that returned something else would be a second copy of the
+    document, waiting to disagree with the one people read.
+    """
+    _, base = server
+
+    _, shown, shown_headers = _get(f"{base}/s/a1b2c3d4")
+    _, saved, saved_headers = _get(f"{base}/d/a1b2c3d4")
+
+    assert shown == saved
+    assert shown_headers["Content-Disposition"].startswith("inline")
+    assert saved_headers["Content-Disposition"].startswith("attachment")
+
+
+def test_the_download_route_should_refuse_an_unknown_scan(server: Server):
+    """The same lookup as the display route, so it fails the same way."""
+    _, base = server
+    status, _, _ = _get(f"{base}/d/deadbeef")
+    assert status == 404

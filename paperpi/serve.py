@@ -39,13 +39,27 @@ logger = logging.getLogger(__name__)
 # URL are two halves of a single policy: spelled separately they drift, and the
 # failure mode is every link silently 404ing.
 _PREFIX = "/s/"
+_SAVE_PREFIX = "/d/"
 _ID_PATTERN = re.compile(rf"^{ID}$")
 _ROUTE = re.compile(rf"^{re.escape(_PREFIX)}({ID})$")
+_SAVE_ROUTE = re.compile(rf"^{re.escape(_SAVE_PREFIX)}({ID})$")
 
 
 def _path_for(scan_id: ScanId) -> str:
     """The path half of a scan's link. The only place it is constructed."""
     return f"{_PREFIX}{scan_id}"
+
+
+def _save_path_for(scan_id: ScanId) -> str:
+    """The same document, asked for as a file rather than a page.
+
+    Two URLs for one document is the settled way to offer both readings: no
+    response header can make a browser's own share command hand over the bytes
+    of a page it is displaying, so getting a scan into another app means
+    downloading it first. A second path rather than a query parameter, so both
+    readings stay as easy to parse as they are to build.
+    """
+    return f"{_SAVE_PREFIX}{scan_id}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,12 +161,14 @@ class _ScanRequestHandler(BaseHTTPRequestHandler):
             return
 
         match = _ROUTE.match(self.path)
-        if match is None:
+        save = _SAVE_ROUTE.match(self.path) if match is None else None
+        found = match or save
+        if found is None:
             self.send_error(404, "not found")
             return
 
         try:
-            path = self._library.path_for(ScanId(match.group(1)))
+            path = self._library.path_for(ScanId(found.group(1)))
         except (ValueError, FileNotFoundError):
             self.send_error(404, "not found")
             return
@@ -167,12 +183,19 @@ class _ScanRequestHandler(BaseHTTPRequestHandler):
             self.send_error(500, "could not read scan")
             return
 
+        # The same bytes, offered two ways. `inline` is what the QR link uses:
+        # scan the code and the document opens, which is the point of it.
+        # `attachment` is what the download icon uses, because a phone can only
+        # share a *file* -- share from the browser and it sends the address,
+        # which arrives at the other end as a few dozen bytes of text wearing a
+        # .pdf name.
+        disposition = "inline" if save is None else "attachment"
         self.send_response(200)
         self.send_header("Content-Type", "application/pdf")
         self.send_header("Content-Length", str(len(payload)))
-        # inline so a phone opens it in the browser rather than downloading a
-        # file it then has to go and find.
-        self.send_header("Content-Disposition", f'inline; filename="{path.name}"')
+        self.send_header(
+            "Content-Disposition", f'{disposition}; filename="{path.name}"'
+        )
         self.end_headers()
         self.wfile.write(payload)
 
@@ -185,7 +208,9 @@ class _ScanRequestHandler(BaseHTTPRequestHandler):
             self.send_error(500, "could not list scans")
             return
 
-        payload = render_index(scans, _path_for, datetime.now()).encode("utf-8")
+        payload = render_index(scans, _path_for, _save_path_for, datetime.now()).encode(
+            "utf-8"
+        )
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
