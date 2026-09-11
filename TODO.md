@@ -5,47 +5,43 @@ Actions only. How things work and why they were built that way live in
 an item that survives three rewrites is usually not an action, or is blocked on
 something nobody has named.
 
-## Waiting on you
+## Next
 
-- [ ] **Buy the scanner.** Blocked until a suitable used fi-6130 / fi-6130Z
-      appears — the seller checklist and parts list are on the tracking task,
-      not duplicated here. Nothing else in this list depends on it except the
-      SANE work below.
+- [ ] **Split the buttons.** Every button starts a scan, which was harmless
+      while the scan was a mock and is not any more — Button A now moves real
+      paper. The intended split is A scans and B runs a safe unmount before the
+      drive is pulled: a change to `BUTTON_PINS` and `StatusScreen.on_button`,
+      not a redesign.
 
 ## Secrets
 
 - [ ] **Move the console passphrase into your password manager**, then
       `provisioning/console-password.txt` can go. It opens the Pi at an attached
       keyboard — the only way in if SSH ever stops working, and with the box
-      deliberately ethernet-only it is the whole recovery story. It is `0600` and gitignored, but
-      this is a public repo, a gitignored file is one `git add -f` away from
-      being in it, and it is backed up nowhere.
+      deliberately ethernet-only it is the whole recovery story.
 
-## Replacing the mock
+## Worth deciding, not yet urgent
 
-- [ ] **Write the SANE adapter** implementing `StartScan` / `ScanHandle` in
-      [`paperpi/ports.py`](paperpi/ports.py), alongside
-      [`adapters/scan_fake.py`](paperpi/adapters/scan_fake.py) rather than
-      replacing it — the fake stays useful for development and tests. It shells
-      `scanimage --batch` and turns its `Scanning page N` output into
-      `PageScanned` events. Do this only once the scanner is in hand.
-- [ ] **Settle the trigger.** Run `scanimage -A` when the scanner arrives: if
-      its front-panel button exposes a usable SANE option, `scanbd` becomes the
-      trigger and the HAT's Button A is the fallback. This decision gates the
-      button mapping below, so make it first.
-- [ ] **Split the buttons.** Every button currently starts a scan, which is
-      right while there is nothing else to do. The intended split is A scans and
-      B runs a safe-unmount before the drive is pulled — a change to
-      `BUTTON_PINS` and `StatusScreen.on_button`, not a redesign.
+- [ ] **Serve on port 80 instead of 8080.** One change that improves three
+      things at once: the address becomes `http://paperpi.local` with nothing to
+      type after it; apps like WhatsApp are far more likely to turn it into a
+      tappable link, since a bare `IP:port` often is not linkified at all; and
+      the shorter URL drops the QR from 33 modules to 29, making it easier to
+      scan. Needs `AmbientCapabilities=CAP_NET_BIND_SERVICE` in the unit so a
+      non-root service can bind a privileged port. The cost is that the address
+      everyone has learned changes once.
 
-## Worth trying
-
-- [ ] **Use the Epson's flatbed as an interim scanner.** Its network advert
-      carries `Scan=T`, meaning it exposes eSCL, so `sane-airscan` would reach
-      it over the LAN with no USB and no vendor driver. It is a flatbed, so it
-      cannot do the duplex ADF job this box exists for — but it would let the
-      scan path be built and tested against real hardware before the fi-6130
-      arrives, instead of against the mock.
+- [ ] **What a jam should leave behind.** A jam mid-batch currently discards
+      every page already scanned, on the grounds that a truncated PDF which
+      looks complete is worse than none. The opposite case is real too: losing
+      forty good pages because sheet forty-one double-fed is its own kind of
+      bad. Assembling the partial and saying so on the Done screen would need a
+      partial-success path the `ScanEvent` union does not currently express.
+      Leave it until it actually annoys someone.
+- [ ] **Retry once on a busy scanner.** SANE reports `Device busy` when the
+      scanner is waking from power-save, and the frontend treats it as fatal
+      rather than retrying. One retry after a couple of seconds would absorb it.
+      Not seen in practice yet, so not built.
 
 ## Carried from the code review
 
@@ -67,8 +63,8 @@ Structural rather than behavioural — none of these change what the box does.
       them above (`app.py`, `serve.py`, the four screens, `render/canvas.py`,
       `adapters/hat.py`, `adapters/preview.py`). Some are forced — a
       default-argument value must precede its `def` — but most are body-only.
-      `models.py`, `adapters/status_linux.py` and `adapters/printer_cups.py`
-      are the ones that do it right.
+      `models.py`, `scans.py`, `adapters/status_linux.py`,
+      `adapters/printer_cups.py` and `adapters/scan_sane.py` do it right.
 - [ ] Make [`paperpi/__init__.py`](paperpi/__init__.py) and
       [`paperpi/render/__init__.py`](paperpi/render/__init__.py) honest. The
       first re-exports nothing while declaring `__all__`; the second re-exports

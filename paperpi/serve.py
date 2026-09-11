@@ -28,9 +28,10 @@ from typing import Any
 
 from . import config
 from .models import Scan, ScanId
+from .scans import ID, scans_in
 from .web import render_index
 
-__all__ = ["ScanLibrary", "scans_in", "serve_in_background"]
+__all__ = ["ScanLibrary", "serve_in_background"]
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +39,13 @@ logger = logging.getLogger(__name__)
 # URL are two halves of a single policy: spelled separately they drift, and the
 # failure mode is every link silently 404ing.
 _PREFIX = "/s/"
-_ID = r"[0-9a-f]{4,32}"
-_ID_PATTERN = re.compile(rf"^{_ID}$")
-_ROUTE = re.compile(rf"^{re.escape(_PREFIX)}({_ID})$")
+_ID_PATTERN = re.compile(rf"^{ID}$")
+_ROUTE = re.compile(rf"^{re.escape(_PREFIX)}({ID})$")
 
 
 def _path_for(scan_id: ScanId) -> str:
     """The path half of a scan's link. The only place it is constructed."""
     return f"{_PREFIX}{scan_id}"
-
-
-def _id_from(path: Path) -> ScanId | None:
-    """Recover a scan's id from its filename, or None if it carries none."""
-    candidate = path.stem.rsplit("-", 1)[-1]
-    return ScanId(candidate) if _ID_PATTERN.match(candidate) else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,41 +109,6 @@ class ScanLibrary:
         for candidate in sorted(self.directory.glob(f"*-{scan_id}.pdf"), reverse=True):
             return candidate
         raise FileNotFoundError(f"no scan with id {scan_id}")
-
-
-def scans_in(directory: Path) -> list[Scan]:
-    """List the documents this application produced, newest first.
-
-    Only files matching the naming this application writes -- a `.pdf` whose
-    stem ends in a valid content-hash id -- are returned. Anything else on the
-    drive is invisible here, which is what lets retention delete from this list
-    without risk of taking a file somebody put there by hand.
-
-    Args:
-        directory: Where scans are written.
-
-    Returns:
-        Possibly empty. Files that vanish mid-listing are skipped rather than
-        raising: this is removable media and can be pulled at any moment.
-    """
-    scans: list[Scan] = []
-    for path in directory.glob("*.pdf"):
-        scan_id = _id_from(path)
-        if scan_id is None:
-            continue
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        scans.append(
-            Scan(
-                scan_id=scan_id,
-                path=path,
-                size_bytes=stat.st_size,
-                modified=datetime.fromtimestamp(stat.st_mtime),
-            )
-        )
-    return sorted(scans, key=lambda scan: scan.modified, reverse=True)
 
 
 def serve_in_background(library: ScanLibrary) -> ThreadingHTTPServer:

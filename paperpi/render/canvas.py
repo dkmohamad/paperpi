@@ -16,12 +16,12 @@ from PIL import Image, ImageDraw, ImageFont
 from .. import config
 from ..models import Rgb
 
-__all__ = ["Canvas", "Fonts"]
+__all__ = ["FOOTER_HEIGHT", "TITLE_HEIGHT", "Canvas", "Fonts"]
 
-_TITLE_HEIGHT = 30
-_FOOTER_HEIGHT = 26
+TITLE_HEIGHT = 30
+FOOTER_HEIGHT = 26
 _ROW_HEIGHT = 34
-_ROW_TOP = _TITLE_HEIGHT + 12
+_ROW_TOP = TITLE_HEIGHT + 12
 _DOT_RADIUS = 5
 # Space either side of the row label, between the dot and the detail.
 _LABEL_GAP = 10
@@ -122,10 +122,10 @@ class Canvas:
                 running total.
         """
         self._draw.rectangle(
-            (0, 0, config.DISPLAY_WIDTH, _TITLE_HEIGHT), fill=config.DIM.as_tuple()
+            (0, 0, config.DISPLAY_WIDTH, TITLE_HEIGHT), fill=config.DIM.as_tuple()
         )
         self._draw.text(
-            (config.MARGIN, _TITLE_HEIGHT // 2),
+            (config.MARGIN, TITLE_HEIGHT // 2),
             left,
             font=self._fonts.title,
             fill=config.TEXT.as_tuple(),
@@ -133,7 +133,7 @@ class Canvas:
         )
         if right:
             self._draw.text(
-                (config.DISPLAY_WIDTH - config.MARGIN, _TITLE_HEIGHT // 2),
+                (config.DISPLAY_WIDTH - config.MARGIN, TITLE_HEIGHT // 2),
                 right,
                 font=self._fonts.title,
                 fill=config.MUTED.as_tuple(),
@@ -146,13 +146,13 @@ class Canvas:
         Args:
             text: What the buttons currently do.
         """
-        top = config.DISPLAY_HEIGHT - _FOOTER_HEIGHT
+        top = config.DISPLAY_HEIGHT - FOOTER_HEIGHT
         self._draw.rectangle(
             (0, top, config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT),
             fill=config.DIM.as_tuple(),
         )
         self._draw.text(
-            (config.DISPLAY_WIDTH // 2, top + _FOOTER_HEIGHT // 2),
+            (config.DISPLAY_WIDTH // 2, top + FOOTER_HEIGHT // 2),
             text,
             font=self._fonts.footer,
             fill=config.MUTED.as_tuple(),

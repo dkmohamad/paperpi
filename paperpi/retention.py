@@ -1,6 +1,6 @@
 """Deleting scans once they are old enough to be clutter.
 
-Built on `serve.scans_in`, and that is the whole safety argument. That function
+Built on `scans.scans_in`, and that is the whole safety argument. That function
 only returns files this application wrote -- a `.pdf` whose name ends in a valid
 content-hash id -- so nothing else on the drive is even visible here. A plain
 `find /mnt/scans -mtime +90 -delete` would have taken anything anyone had put
@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import config
 from .models import Scan
-from .serve import scans_in
+from .scans import scans_in
 
 __all__ = ["expired", "main"]
 

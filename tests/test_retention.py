@@ -6,7 +6,7 @@ from pathlib import Path
 
 from paperpi.models import Scan, ScanId
 from paperpi.retention import expired
-from paperpi.serve import scans_in
+from paperpi.scans import scans_in
 
 _NOW = datetime(2026, 9, 10, 12, 0)
 

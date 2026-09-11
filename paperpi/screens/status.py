@@ -80,7 +80,12 @@ class StatusScreen:
         canvas.footer("press any button to scan")
 
     def on_button(self, button: Button) -> Screen | None:
-        """Start a scan. Every button does this until the scanner arrives."""
+        """Start a scan.
+
+        Every button does this, which was harmless while the scan was a mock
+        and is not now that a press moves real paper. Splitting them -- A
+        scans, B unmounts the drive -- is tracked in TODO.md.
+        """
         del button
         return ScanningScreen(
             handle=self._start_scan(),

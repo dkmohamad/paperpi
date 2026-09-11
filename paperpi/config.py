@@ -28,8 +28,18 @@ __all__ = [
     "PRINTER_FAULTS",
     "PRINTER_INTERFACE_CLASS",
     "READINESS_COLOURS",
+    "SANE_CONFIG_DIR",
+    "SCANNER_BACKEND",
+    "SCANNER_END_OF_FEED",
+    "SCANNER_FAULTS",
     "SCANNER_USB_VENDORS",
     "SCAN_DIR",
+    "SCAN_MODE",
+    "SCAN_PAGE_HEIGHT_MM",
+    "SCAN_PAGE_WIDTH_MM",
+    "SCAN_RESOLUTION_DPI",
+    "SCAN_ROTATION_DEGREES",
+    "SCAN_SOURCE",
     "SPI_BACKLIGHT",
     "SPI_CS",
     "SPI_DC",
@@ -78,6 +88,72 @@ DONE_SCREEN_SECONDS = 45
 # Source: USB-IF Defined Class Codes, https://www.usb.org/defined-class-codes
 PRINTER_INTERFACE_CLASS = "07"
 
+# The one scan profile. There is deliberately no way to change these from the
+# panel: a settings surface is a thing to get wrong, and the box exists to make
+# scanning a document a single button press.
+#
+# Verified against `scanimage -A` on the fi-6130 itself, which is the only
+# authority on the spellings -- the backend rejects anything else.
+SCAN_SOURCE: str = "ADF Duplex"
+SCAN_MODE = "Lineart"
+SCAN_RESOLUTION_DPI = 300
+
+# A4, in millimetres. NOT optional: the backend's own defaults are US Letter
+# (215.9 x 279.4), and 279.4 mm is 17.6 mm shorter than A4 -- so left alone it
+# quietly cuts the bottom off every page.
+SCAN_PAGE_WIDTH_MM = 210
+SCAN_PAGE_HEIGHT_MM = 297
+
+# A SANE config directory holding only the backend we use. Debian enables 77
+# by default and loads every one to enumerate devices, which measured 8.7
+# seconds on this Pi against 0.03 with just this backend -- far too slow to sit
+# in front of a scan. The trailing colon is load-bearing: it appends the
+# default path, so the backend's own config is still found. A missing directory
+# degrades to the default rather than failing, which is what makes this safe on
+# a development machine.
+SANE_CONFIG_DIR = "/etc/paperpi/sane:"
+
+# This scanner hands back every page upside down, so each one is turned before
+# it goes into the PDF. Measured, not assumed: a sheet with TOP written across
+# it came back with the writing in the bottom fifth of the image, loaded the way
+# the operator's guide says to load it.
+#
+# Page *order* deliberately has no such correction, and it is worth saying why
+# so nobody adds one. The feeder takes from the bottom of the stack, and the
+# guide says to load face-down -- which means flipping the document over, which
+# puts page one at the bottom, which is exactly where the feeder starts. The two
+# cancel out. An earlier version of this file reversed the pages in software and
+# was wrong for anyone following the manual.
+#
+# If a different scanner replaces this one, re-measure rather than assume: write
+# TOP on a sheet, number a second, scan them, and look at where the ink lands.
+SCAN_ROTATION_DEGREES: int = 180
+
+# Which backend drives the scanner. The full SANE device name carries a serial
+# that changes with the unit, so the adapter finds the device by this prefix
+# rather than pinning one machine's name into the source.
+SCANNER_BACKEND = "fujitsu"
+
+# SANE reports failures through a fixed set of status strings. These are the
+# ones worth saying differently to someone standing at the machine; anything
+# else reaches the display as SANE's own wording rather than being swallowed.
+# Source: sane_strstatus(), sane-backends.
+# How SANE says the feeder is empty. Named because it is not only a fault: it
+# is also how every successful batch ends, so the adapter has to compare
+# against it. Spelled once so the two readings cannot drift apart.
+SCANNER_END_OF_FEED = "Document feeder out of documents"
+
+SCANNER_FAULTS = {
+    "Access to resource has been denied": "no permission for the scanner",
+    "Device busy": "scanner is busy",
+    "Document feeder jammed": "paper jam or double feed",
+    SCANNER_END_OF_FEED: "no paper in the feeder",
+    "Error during device I/O": "lost contact with the scanner",
+    "Invalid argument": "the scanner refused these settings",
+    "Operation was cancelled": "cancelled",
+    "Out of memory": "out of memory",
+    "Scanner cover is open": "cover open",
+}
 # IPP reports faults as standardised keywords, which is what makes them worth
 # matching on -- but "media-empty" is not what someone standing at the machine
 # calls it. Anything unmapped reaches the display as its raw keyword rather

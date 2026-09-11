@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 from ipaddress import IPv4Address
 from pathlib import Path
 
+import qrcode
+from qrcode.constants import ERROR_CORRECT_M
+
 from paperpi import config
 from paperpi.models import (
     Button,
@@ -23,7 +26,9 @@ from paperpi.models import (
     SystemStatus,
 )
 from paperpi.render.canvas import Canvas, Fonts
+from paperpi.render.qr import qr_image
 from paperpi.screens import DoneScreen, ErrorScreen, ScanningScreen, StatusScreen
+from paperpi.screens.done import _QR_BUDGET
 
 from .conftest import ScriptedScan
 
@@ -274,3 +279,34 @@ def test_error_should_not_silently_drop_a_long_message(fonts: Fonts):
     )
     assert len(lines) == 3
     assert lines[-1].endswith("\N{HORIZONTAL ELLIPSIS}")
+
+
+def test_the_done_screen_qr_should_stay_big_enough_to_scan(fonts: Fonts):
+    """A QR is only as readable as its smallest feature.
+
+    Modules are drawn at a whole number of pixels, so the usable size steps
+    rather than slides: a layout change that trims the QR's budget can drop it
+    a whole pixel per module and halve its physical size without looking like
+    much in the diff. This pins the floor.
+
+    On this 1.3-inch panel six pixels is about half a millimetre per module,
+    which is around the limit of what a phone camera resolves at arm's length.
+    """
+    link = "http://paperpi.local:8080/s/a1b2c3d4"
+    code = qr_image(link, _QR_BUDGET, config.BACKGROUND, config.TEXT)
+
+    modules = len(_matrix(link))
+    assert code.width // modules >= 6, (
+        f"{code.width}px over {modules} modules is "
+        f"{code.width // modules}px each -- too small to scan reliably"
+    )
+    # And it has to fit the panel it is drawn on.
+    assert code.width <= config.DISPLAY_WIDTH
+    assert code.height <= config.DISPLAY_HEIGHT
+
+
+def _matrix(link: str):
+    code = qrcode.QRCode(error_correction=ERROR_CORRECT_M, border=2)
+    code.add_data(link)
+    code.make(fit=True)
+    return code.get_matrix()

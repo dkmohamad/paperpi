@@ -20,6 +20,7 @@ __all__ = [
     "Display",
     "PrintQueues",
     "ScanHandle",
+    "ScannerDevice",
     "StartScan",
     "StatusSource",
 ]
@@ -31,6 +32,11 @@ type StatusSource = Callable[[], SystemStatus]
 # StatusSource because it is the one reading that leaves the filesystem -- it
 # asks the print server -- so it is injected and can be faked without one.
 type PrintQueues = Callable[[], Sequence[PrintQueue]]
+
+# Naming the attached scanner, or None when the backend cannot see one.
+# Separate from StatusSource because it is expensive: it spawns a process,
+# so whoever holds it decides how often it is worth asking.
+type ScannerDevice = Callable[[], str | None]
 
 
 class ScanHandle(Protocol):

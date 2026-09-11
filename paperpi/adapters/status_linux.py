@@ -8,9 +8,11 @@ no print server, and the composition root stays the only place that picks an
 adapter. Why that port is spoken over IPP rather than by running `lpstat` is
 argued where the decision was made, in `printer_cups`.
 
-Where a layer is genuinely missing, the report says so instead of guessing. No
-SANE backend exists yet, so a detected scanner reports as attached-without-a-
-driver rather than ready -- a claim the first scan would disprove.
+Where a layer is genuinely missing, the report says so instead of guessing.
+Both peripherals are reported in two halves -- what is on the bus, and what can
+actually be driven -- and neither half is taken as evidence of the other. A
+scanner with no backend reports as attached-without-a-driver rather than ready,
+which is a claim the first scan would disprove.
 """
 
 import shutil
@@ -32,7 +34,7 @@ from ..models import (
     Storage,
     SystemStatus,
 )
-from ..ports import PrintQueues
+from ..ports import PrintQueues, ScannerDevice
 
 __all__ = ["LinuxStatus", "current_address"]
 
@@ -78,12 +80,14 @@ class LinuxStatus:
         *,
         scan_dir: Path,
         queues: PrintQueues,
+        scanner: ScannerDevice,
         sys_usb: Path = _SYS_USB,
         sys_net: Path = _SYS_NET,
         thermal: Path = _THERMAL,
     ):
         self._scan_dir = scan_dir
         self._queues = queues
+        self._probe = _ScannerProbe(scanner)
         self._sys_usb = sys_usb
         self._sys_net = sys_net
         self._thermal = thermal
@@ -153,23 +157,33 @@ class LinuxStatus:
         return devices
 
     def _scanner(self, devices: list[_UsbDevice]) -> Peripheral:
+        """Compose USB presence with what the scanning backend can see.
+
+        The same two-halves shape as the printer row, for the same reason --
+        attached is not driveable -- but sampled differently. There is no cheap
+        equivalent of the print server's socket: listing SANE devices spawns a
+        process, so it runs only when the bus changes rather than every poll.
+        """
+        attached = self._attached_scanner(devices)
+        device = self._probe.look(present=attached is not None)
+
+        if attached is None:
+            return _scanner_row(Readiness.ABSENT, "no device")
+        if device is None:
+            return _scanner_row(Readiness.UNCONFIGURED, f"{attached} · no driver")
+        # Just the model: the readiness column already says "ready", and unlike
+        # the printer there is no second state to distinguish here -- a running
+        # scan has a screen of its own. The name comes from the backend because
+        # USB has none to give; this scanner reports empty product strings.
+        return _scanner_row(Readiness.READY, _model_of(device))
+
+    def _attached_scanner(self, devices: list[_UsbDevice]) -> str | None:
+        """Name the USB-attached scanner, or None if there is not one."""
         for device in devices:
             if device.vendor in config.SCANNER_USB_VENDORS:
                 maker = config.SCANNER_USB_VENDORS[device.vendor]
-                name = device.name or f"{maker} device"
-                # Attached is not the same as driveable: SANE is not installed
-                # yet, so claiming READY would be a lie the scan disproves.
-                # Retire this branch when `scanimage -L` can answer instead.
-                return Peripheral(
-                    kind=PeripheralKind.SCANNER,
-                    readiness=Readiness.UNCONFIGURED,
-                    detail=f"{name} · no driver",
-                )
-        return Peripheral(
-            kind=PeripheralKind.SCANNER,
-            readiness=Readiness.ABSENT,
-            detail="no device",
-        )
+                return _model(device.name) or f"{maker} device"
+        return None
 
     def _printer(self, devices: list[_UsbDevice]) -> Peripheral:
         """Compose USB presence with the print queue's own view.
@@ -275,6 +289,48 @@ def _model(name: str) -> str:
     instead of being truncated away.
     """
     return name.removesuffix(" Series").strip()
+
+
+class _ScannerProbe:
+    """What the scanning backend last said, asked again only when it can change.
+
+    Listing SANE devices costs a process spawn, which is far too much for a
+    loop that samples every couple of seconds -- but probing once at start-up
+    would leave a scanner plugged in afterwards reading "no driver" until
+    somebody restarted the service, which is exactly when a person is standing
+    there watching. Presence is cheap and live; the probe follows it.
+    """
+
+    def __init__(self, find: ScannerDevice):
+        self._find = find
+        self._present = False
+        self._device: str | None = None
+
+    def look(self, *, present: bool) -> str | None:
+        """The device name, probing only when the scanner has just appeared."""
+        if not present:
+            self._present = False
+            self._device = None
+            return None
+        if not self._present:
+            self._present = True
+            self._device = self._find()
+        return self._device
+
+
+def _scanner_row(readiness: Readiness, detail: str) -> Peripheral:
+    """Build a scanner peripheral, since every branch above returns one."""
+    return Peripheral(kind=PeripheralKind.SCANNER, readiness=readiness, detail=detail)
+
+
+def _model_of(device: str) -> str:
+    """Pull the model out of a SANE device name.
+
+    They are `backend:model:serial`, so the middle field is the part worth a
+    row on the panel. Anything unexpected is shown whole rather than mangled.
+    """
+    parts = device.split(":")
+    return parts[1] if len(parts) >= 3 else device
 
 
 def _printer_row(readiness: Readiness, detail: str) -> Peripheral:

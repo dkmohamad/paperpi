@@ -64,7 +64,10 @@ def _usb_device(
 
 
 def _status(
-    tmp_path: Path, scan_dir: Path, queues: Sequence[PrintQueue] = ()
+    tmp_path: Path,
+    scan_dir: Path,
+    queues: Sequence[PrintQueue] = (),
+    scanner: str | None = None,
 ) -> LinuxStatus:
     usb = tmp_path / "usb"
     net = tmp_path / "net"
@@ -77,6 +80,7 @@ def _status(
     return LinuxStatus(
         scan_dir=scan_dir,
         queues=lambda: queues,
+        scanner=lambda: scanner,
         sys_usb=usb,
         sys_net=net,
         thermal=thermal,
@@ -268,6 +272,7 @@ def test_temperature_should_be_none_when_unreadable(tmp_path: Path, scan_dir: Pa
     status = LinuxStatus(
         scan_dir=scan_dir,
         queues=lambda: (),
+        scanner=lambda: None,
         sys_usb=tmp_path / "usb",
         sys_net=tmp_path / "net",
         thermal=tmp_path / "absent",
@@ -290,6 +295,7 @@ def test_network_should_name_the_first_interface_that_is_up(
     status = LinuxStatus(
         scan_dir=scan_dir,
         queues=lambda: (),
+        scanner=lambda: None,
         sys_usb=tmp_path / "usb",
         sys_net=net,
         thermal=tmp_path / "absent",
@@ -302,6 +308,7 @@ def test_storage_should_be_absent_when_the_scan_directory_is_missing(tmp_path: P
     status = LinuxStatus(
         scan_dir=tmp_path / "nowhere",
         queues=lambda: (),
+        scanner=lambda: None,
         sys_usb=tmp_path / "usb",
         sys_net=tmp_path / "net",
         thermal=tmp_path / "absent",
@@ -375,3 +382,107 @@ def test_a_stopped_queue_should_outrank_a_rejecting_one(tmp_path: Path, scan_dir
     detail = _peripheral(status, PeripheralKind.PRINTER).detail
     assert "paper jam" in detail
     assert "not accepting" not in detail
+
+
+def test_scanner_should_be_ready_when_the_backend_can_see_it(
+    tmp_path: Path, scan_dir: Path
+):
+    """Both halves agree: on the bus, and a backend that can drive it.
+
+    The model comes from the backend rather than USB, because this scanner
+    reports empty product strings -- so without the probe the row could only
+    say the maker's name.
+    """
+    status = _status(tmp_path, scan_dir, scanner="fujitsu:fi-6130dj:000000")
+    _usb_device(tmp_path / "usb", "1-1", "04c5", "114f", "", ["ff"])
+    scanner = _peripheral(status, PeripheralKind.SCANNER)
+    assert scanner.readiness is Readiness.READY
+    # The model alone: the readiness column already says ready, and saying it
+    # twice spends the row's width on nothing.
+    assert scanner.detail == "fi-6130dj"
+
+
+def test_scanner_attached_without_a_backend_stays_unconfigured(
+    tmp_path: Path, scan_dir: Path
+):
+    """On the bus but undriveable is a setup task, not a fault or a readiness."""
+    status = _status(tmp_path, scan_dir, scanner=None)
+    _usb_device(tmp_path / "usb", "1-1", "04c5", "114f", "", ["ff"])
+    scanner = _peripheral(status, PeripheralKind.SCANNER)
+    assert scanner.readiness is Readiness.UNCONFIGURED
+    assert "no driver" in scanner.detail
+
+
+def test_the_backend_should_be_asked_once_while_the_scanner_stays_put(
+    tmp_path: Path, scan_dir: Path
+):
+    """Listing devices spawns a process, so it must not ride the poll loop.
+
+    The status source is sampled every couple of seconds; probing each time
+    would spend a process every two seconds to re-learn something that cannot
+    have changed.
+    """
+    asked = 0
+
+    def find() -> str | None:
+        nonlocal asked
+        asked += 1
+        return "fujitsu:fi-6130dj:000000"
+
+    usb = tmp_path / "usb"
+    usb.mkdir(exist_ok=True)
+    net = tmp_path / "net"
+    net.mkdir(exist_ok=True)
+    (net / "eth0").mkdir(exist_ok=True)
+    (net / "eth0" / "operstate").write_text("up\n")
+    status = LinuxStatus(
+        scan_dir=scan_dir,
+        queues=lambda: (),
+        scanner=find,
+        sys_usb=usb,
+        sys_net=net,
+        thermal=tmp_path / "absent",
+    )
+    _usb_device(usb, "1-1", "04c5", "114f", "", ["ff"])
+
+    for _ in range(5):
+        status()
+    assert asked == 1
+
+
+def test_unplugging_should_make_the_backend_worth_asking_again(
+    tmp_path: Path, scan_dir: Path
+):
+    """A cached answer must not outlive the scanner it describes.
+
+    Caching forever would leave the row claiming a ready scanner that is no
+    longer attached, and would never notice a different one plugged in.
+    """
+    answers = iter(["fujitsu:first:1", "fujitsu:second:2"])
+    usb = tmp_path / "usb"
+    usb.mkdir(exist_ok=True)
+    net = tmp_path / "net"
+    net.mkdir(exist_ok=True)
+    (net / "eth0").mkdir(exist_ok=True)
+    (net / "eth0" / "operstate").write_text("up\n")
+    status = LinuxStatus(
+        scan_dir=scan_dir,
+        queues=lambda: (),
+        scanner=lambda: next(answers, None),
+        sys_usb=usb,
+        sys_net=net,
+        thermal=tmp_path / "absent",
+    )
+
+    _usb_device(usb, "1-1", "04c5", "114f", "", ["ff"])
+    assert "first" in _peripheral(status, PeripheralKind.SCANNER).detail
+
+    # Unplugged: the row goes absent and the cached name goes with it.
+    for child in sorted((usb / "1-1").rglob("*"), reverse=True):
+        child.unlink() if child.is_file() else child.rmdir()
+    (usb / "1-1").rmdir()
+    assert _peripheral(status, PeripheralKind.SCANNER).readiness is Readiness.ABSENT
+
+    # A different unit plugged in is found, not remembered wrongly.
+    _usb_device(usb, "1-2", "04c5", "114f", "", ["ff"])
+    assert "second" in _peripheral(status, PeripheralKind.SCANNER).detail

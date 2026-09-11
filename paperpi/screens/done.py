@@ -11,16 +11,19 @@ from datetime import datetime, timedelta
 from .. import config
 from ..models import Button, Readiness, Rgb, ScanFinished
 from ..protocols import Screen
-from ..render.canvas import Canvas
+from ..render.canvas import TITLE_HEIGHT, Canvas
 from ..render.format import format_duration, format_size
 from ..render.qr import qr_image
 
 __all__ = ["DoneScreen"]
 
-_QR_SIZE = 116
-_QR_LEFT = 14
-_QR_TOP = 48
-_TEXT_LEFT = _QR_LEFT + _QR_SIZE + 16
+# The QR gets everything below the title bar. It is the only thing on this
+# screen that has to work from arm's length, and a code is only as scannable as
+# its smallest feature: modules are drawn at a whole number of pixels each, so
+# the usable size steps rather than slides. Giving it the full panel is what
+# buys a sixth pixel per module instead of a third of the space and three.
+_GAP = 4
+_QR_BUDGET = config.DISPLAY_HEIGHT - TITLE_HEIGHT - _GAP * 2
 
 
 class DoneScreen:
@@ -44,7 +47,7 @@ class DoneScreen:
         self._shown_at: datetime | None = None
         # Rendered once: the code cannot change while this screen is showing,
         # and re-encoding it every frame would be pure waste.
-        self._qr = qr_image(link, _QR_SIZE, config.BACKGROUND, config.TEXT)
+        self._qr = qr_image(link, _QR_BUDGET, config.BACKGROUND, config.TEXT)
 
     @property
     def led(self) -> Rgb:
@@ -52,36 +55,26 @@ class DoneScreen:
         return config.READINESS_COLOURS[Readiness.READY]
 
     def render(self, canvas: Canvas) -> None:
-        """Draw the QR beside the document's name, size and duration."""
+        """Draw the summary in the title bar and give the QR everything else.
+
+        The filename is deliberately not shown. It is a timestamp and a hash --
+        nothing a person reads off a panel and does anything with -- and the
+        space it took is worth more as code.
+        """
         summary = (
-            f"{self._finished.pages} pages  {format_duration(self._finished.duration)}"
+            f"{self._finished.pages} pages  "
+            f"{format_size(self._finished.size_bytes)}  "
+            f"{format_duration(self._finished.duration)}"
         )
         canvas.title("DONE", summary)
-        canvas.paste(self._qr, (_QR_LEFT, _QR_TOP))
 
-        canvas.text(
-            (_TEXT_LEFT, _QR_TOP + 8),
-            canvas.truncated(
-                self._finished.path.name,
-                canvas.fonts.detail,
-                config.DISPLAY_WIDTH - _TEXT_LEFT - config.MARGIN,
-            ),
-            canvas.fonts.detail,
-            config.TEXT,
-        )
-        canvas.text(
-            (_TEXT_LEFT, _QR_TOP + 34),
-            format_size(self._finished.size_bytes),
-            canvas.fonts.detail,
-            config.MUTED,
-        )
-        canvas.text(
-            (_TEXT_LEFT, _QR_TOP + 76),
-            "scan to open",
-            canvas.fonts.label,
-            config.ACCENT,
-        )
-        canvas.footer("any button to return")
+        # Placed from the rendered size rather than the budget: the code lands
+        # on whole modules, so it is usually a little smaller than the space it
+        # was offered, and centring on the budget would sit it off to one side.
+        left = (config.DISPLAY_WIDTH - self._qr.width) // 2
+        body = config.DISPLAY_HEIGHT - TITLE_HEIGHT
+        top = TITLE_HEIGHT + (body - self._qr.height) // 2
+        canvas.paste(self._qr, (left, top))
 
     def on_button(self, button: Button) -> Screen | None:
         """Return to the resting screen."""

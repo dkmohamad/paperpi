@@ -12,10 +12,10 @@ What is still outstanding is in [`TODO.md`](TODO.md).
 box. Press any button and it runs a scan, reporting progress live. When the
 scan finishes it shows a QR code that opens the document on your phone.
 
-**The scan is currently mocked**, because the scanner has not arrived.
-Everything downstream of it is real: the mock writes a genuine multi-page PDF,
-the HTTP server serves it, and the QR resolves. Swapping in the SANE adapter
-later changes one module and nothing else.
+**The mock is still there, and still useful.** It was what proved every path
+downstream of a scan before the scanner existed, and it is now what `--preview`
+runs against on a desktop and what the tests drive. Swapping the real scanner in
+changed one module and one line of the composition root; no screen moved.
 
 **Rendering is not a framebuffer.** There is no `/dev/fb*` on the Pi. The panel
 is an ST7789 on SPI, and a frame is 320×240×2 bytes pushed down `/dev/spidev0.1`.
@@ -170,80 +170,18 @@ The page is entirely self-contained — inline CSS, no JavaScript, no webfont, n
 CDN. The person opening it is usually standing beside the scanner on the house
 wifi, which is precisely where a phone may have no route to the internet.
 
-### Printing
+### Scanning and printing
 
-**The printer appears as `paperpi`** on any phone, tablet or laptop on the LAN —
-no app, no account, no pairing. CUPS drives the Epson over USB and advertises
-the queue over DNS-SD, which is what AirPrint and Mopria both discover. Setup,
-once:
+Both work the same way from the household's side: put paper in, press a button
+or hit Print, and the result appears. Both also took a page of setup with
+several steps that fail quietly if skipped, so they have a document each rather
+than a section here:
 
-```sh
-sudo apt-get install -y --no-install-recommends \
-    cups printer-driver-escpr cups-ipp-utils avahi-utils libpaper-utils
-sudo paperconfig -p a4
-sudo systemctl enable --now cups.service
-
-# Read both URIs off the machine rather than typing them.
-device=$(sudo lpinfo -v | awk '/usb:\/\/EPSON/ {print $2}')
-driver=$(sudo lpinfo -m | awk '/Epson-ET-2810_Series/ {print $1}')
-sudo lpadmin -p paperpi -D paperpi -L home -v "$device" -m "$driver" \
-    -o printer-is-shared=true -E
-sudo lpadmin -d paperpi
-sudo cupsctl --share-printers
-sudo systemctl restart cups
-```
-
-Six things here are not obvious, and five of them cost an afternoon each if got
-wrong:
-
-- **`--no-install-recommends` is about correctness, not disk space.** The
-  recommends include `cups-browsed`, which discovers *remote* queues and creates
-  local ones — the opposite of what is wanted, and a known source of phantom
-  duplicates — and the whole SANE stack, which should not arrive as a side
-  effect of installing a printer.
-- **`paperconfig -p a4` is not optional.** There is no `/etc/papersize` on a
-  fresh image, and CUPS derives `media-ready` from libpaper. iOS reads
-  `media-ready` to choose paper, so if it resolves to Letter then A4 jobs print
-  scaled or clipped, and it looks like a driver fault.
-- **`cups.service` must be enabled, not merely `cups.socket`.** The socket unit
-  listens only on the UNIX socket, and cupsd idle-exits after 60 s when nothing
-  is shared — so nothing would be left to wake it over the network.
-- **`cupsctl --share-printers` is the whole of the sharing config.** It rewrites
-  `Listen localhost:631` to `Port 631`, puts `Allow @LOCAL` in `<Location />`,
-  and sets `Browsing On`, while leaving `<Location /admin>` alone — which is
-  what keeps administration on localhost. Editing `cupsd.conf` by hand is both
-  unnecessary and fragile in the other direction: `cupsctl` and the web UI
-  rewrite that file, so a hand edit can be silently reverted.
-- **The driver URI must be copied exactly.** Debian's `printer-driver-escpr`
-  ships no `.ppd` files at all; they are generated on demand by a driver
-  enumerator, so a stray character produces the thoroughly misleading
-  `Missing PPD-Adobe-4.x header on line 0`. Hence reading it with `awk` above.
-- **`usblp` is deliberately left loaded.** It holds the printer as
-  `/dev/usb/lp0`, and CUPS's libusb backend detaches and re-attaches it around
-  each job. Blacklisting it is pre-libusb advice that would only break other
-  tooling.
-
-Verify the advert rather than trusting it — this is the part that decides
-whether an iPhone will offer the printer at all:
-
-```sh
-ipptool -tv ipp://localhost/printers/paperpi \
-    /usr/share/cups/ipptool/get-printer-attributes.test | grep -i urf-supported
-avahi-browse -rt _ipp._tcp
-```
-
-`URF=` must be non-empty, `pdl=` must contain both `application/pdf` and
-`image/urf`, and `media-ready` must contain A4.
-
-Administration is localhost-only by design, so reach the web UI over a tunnel:
-
-```sh
-ssh -L 6310:localhost:631 admin@paperpi.local   # then http://localhost:6310/
-```
-
-`lpadmin` warns that printer drivers are deprecated and will stop working in a
-future CUPS. That is a CUPS 3.x change rather than a trixie one, and it will
-need revisiting then, most likely as a Printer Application instead of a PPD.
+- **[docs/scanning.md](docs/scanning.md)** — the fixed profile, how to load the
+  feeder, the permissions step, and the two paper-handling corrections this
+  scanner needs.
+- **[docs/printing.md](docs/printing.md)** — the CUPS queue, why the printer
+  could never do AirPrint on its own, and the traps in sharing it.
 
 ### If a device cannot see the box
 
@@ -276,7 +214,7 @@ the simpler machine.
 `paperpi-retention.timer` runs daily and removes scans older than 90 days,
 `Persistent=true` so a box that was off overnight still tidies when it returns.
 
-It works through `serve.scans_in`, which is the safety argument: that function
+It works through `scans.scans_in`, which is the safety argument: that function
 only returns `.pdf` files whose name carries a valid content-hash id, so
 retention **cannot delete anything the application did not write**. A plain
 `find /mnt/scans -mtime +90 -delete` would take whatever else happens to be on
@@ -326,6 +264,7 @@ image out — so they are tested with no hardware at all.
 | Module | Holds |
 |---|---|
 | `models.py` | The vocabulary: readiness, scan events, print queues, colours |
+| `scans.py` | What a scan file is called, and how one is found again |
 | `ports.py` | IO contracts — Display, Buttons, StartScan, StatusSource, PrintQueues |
 | `protocols.py` | The Screen contract |
 | `app.py` | The render loop |
@@ -333,7 +272,7 @@ image out — so they are tested with no hardware at all.
 | `render/` | Canvas, fonts, QR — no hardware |
 | `adapters/` | Real and stand-in implementations |
 | `serve.py` | Read-only HTTP file server behind the QR |
-| `retention.py` | The 90-day sweep, built on `serve.scans_in` |
+| `retention.py` | The 90-day sweep, built on `scans.scans_in` |
 
 The font ships inside the package rather than coming from the system, so the
 desktop preview renders identically to the Pi — which has no fonts installed at
@@ -341,12 +280,13 @@ all.
 
 ## Next
 
-The real SANE adapter, once the scanner arrives. It implements `StartScan` and
-`ScanHandle` alongside the fake rather than replacing it, so the fake stays
-useful for development and for tests. Everything downstream of it is already
-real: the PDF, the HTTP server, the QR and retention.
+Button B still starts a scan, like every other button, which was harmless while
+the scan was a mock and is not any more. Splitting them — A scans, B safely
+unmounts the drive before it is pulled — is the next change, and the rest of the
+list is in [`TODO.md`](TODO.md).
 
-Peripheral detection stays honest — it reports what is attached and, separately,
-what can actually be driven, never treating one as evidence of the other. That
-is why the printer row moved from `no queue` to `ready` the moment CUPS could
-answer for it, without a line changing in any screen.
+Peripheral detection stays honest throughout: every row reports what is attached
+and, separately, what can actually be driven, never treating one as evidence of
+the other. That is why each row lit up as its layer landed — `no queue` to
+`ready` when CUPS could answer, `no driver` to the model name when SANE could —
+without a line changing in any screen.

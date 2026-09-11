@@ -14,6 +14,7 @@ from pathlib import Path
 from . import app, config
 from .adapters.printer_cups import CupsQueues
 from .adapters.scan_fake import FakeScanner
+from .adapters.scan_sane import SaneScanner, find_device
 from .adapters.status_linux import LinuxStatus, current_address
 from .models import PageScanned, ScanEvent, ScanFinished, ScanId, ScanStarted, Side
 from .ports import Buttons, Display
@@ -41,7 +42,7 @@ def main() -> None:
     scan_dir: Path = args.scan_dir
     scan_dir.mkdir(parents=True, exist_ok=True)
     fonts = Fonts.load()
-    status = LinuxStatus(scan_dir=scan_dir, queues=CupsQueues())
+    status = LinuxStatus(scan_dir=scan_dir, queues=CupsQueues(), scanner=find_device)
     hostname = socket.gethostname()
 
     # The address is asked for per link rather than sampled once: a lease can
@@ -62,7 +63,7 @@ def main() -> None:
     display, buttons, running = _devices(args)
     home = StatusScreen(
         status=status,
-        start_scan=FakeScanner(scan_dir=scan_dir, now=datetime.now).start,
+        start_scan=_scanner(args, scan_dir).start,
         link_for=lambda finished: library.url_for(finished.scan_id),
         hostname=hostname,
         web_address=f"{hostname}.local:{args.port}",
@@ -120,6 +121,17 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _scanner(args: argparse.Namespace, scan_dir: Path):
+    """Choose the real scanner or the stand-in.
+
+    The fake is not a leftover: it is what `--preview` runs against on a
+    desktop with no scanner attached, and what the tests drive.
+    """
+    if args.preview:
+        return FakeScanner(scan_dir=scan_dir, now=datetime.now)
+    return SaneScanner(scan_dir=scan_dir, now=datetime.now)
+
+
 def _devices(args: argparse.Namespace):
     """Build the display and button pair for the requested mode."""
     if args.preview:
@@ -162,7 +174,9 @@ def _sample_screens(library: ScanLibrary, hostname: str) -> dict[str, Screen]:
     # No queue source for a screenshot pass: it renders layouts, and reaching
     # for a live print server to do it would make the output depend on the
     # machine it ran on.
-    status = LinuxStatus(scan_dir=library.directory, queues=lambda: ())
+    status = LinuxStatus(
+        scan_dir=library.directory, queues=lambda: (), scanner=lambda: None
+    )
     home = StatusScreen(
         status=status,
         start_scan=_unavailable,

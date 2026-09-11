@@ -170,10 +170,6 @@ afterwards — the display service, the scan drive, the web index, retention and
 the print queue — is in the [top-level README](../README.md), which is the one
 to follow for a rebuild.
 
-Still outstanding there is the scanner: `sane-utils`, `scanimage -L` to confirm
-detection, and `scanimage -A` to learn whether the scanner's own button is
-usable, which decides whether it or the HAT's Button A becomes the trigger.
-
 None of it runs at first boot, deliberately — a failed package install is close
 to invisible on a headless box, so a Pi that does not come up has a short list
 of causes.

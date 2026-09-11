@@ -9,7 +9,6 @@ The timeline is computed from the clock rather than run on a thread, so a test
 can drive a whole scan by handing it the times it wants.
 """
 
-import hashlib
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -22,10 +21,10 @@ from ..models import (
     ScanEvent,
     ScanFailed,
     ScanFinished,
-    ScanId,
     ScanStarted,
     Side,
 )
+from ..scans import write_scan
 
 __all__ = ["FakeScanner"]
 
@@ -119,25 +118,20 @@ class _FakeScanHandle:
         self._cancelled = True
 
     def _write(self, elapsed: timedelta) -> ScanFinished:
-        """Render the pages to a PDF and name it after its own content."""
+        """Render the pages to a PDF and hand it to the shared writer.
+
+        Naming is deliberately not done here. It is a contract the reader and
+        retention both depend on, so it lives in one place that every producer
+        calls -- see `paperpi.scans`.
+        """
         pages = [self._page(number) for number in range(1, self._pages + 1)]
         buffer = BytesIO()
         pages[0].save(buffer, format="PDF", save_all=True, append_images=pages[1:])
-        data = buffer.getvalue()
-
-        # Content-addressed: the handle is derived from the bytes, so it is
-        # stable across runs and cannot name a document that no longer matches.
-        scan_id = ScanId(hashlib.sha256(data).hexdigest()[:8])
-        stamp = self._started_at.strftime("%Y-%m-%d-%H%M")
-        path = self._scan_dir / f"{stamp}-{scan_id}.pdf"
-        self._scan_dir.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-
-        return ScanFinished(
-            scan_id=scan_id,
-            path=path,
+        return write_scan(
+            data=buffer.getvalue(),
+            scan_dir=self._scan_dir,
+            started_at=self._started_at,
             pages=self._pages,
-            size_bytes=len(data),
             duration=elapsed,
         )
 

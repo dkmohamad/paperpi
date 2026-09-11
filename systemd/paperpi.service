@@ -11,6 +11,11 @@ Wants=network-online.target
 Type=simple
 User=admin
 Group=admin
+# Access to the scanner is granted by a POSIX ACL on its USB node, which
+# `libsane1`'s udev rule sets to `group:scanner:rw`. Declared here as well
+# as on the user, so a rebuilt box that forgets the `usermod` still works
+# and the dependency is visible where the service is defined.
+SupplementaryGroups=scanner
 WorkingDirectory=/home/admin/paperpi
 ExecStart=/home/admin/paperpi/.venv/bin/python -m paperpi --scan-dir /mnt/scans
 Restart=on-failure
