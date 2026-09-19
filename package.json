@@ -1,0 +1,13 @@
+{
+  "name": "paperpi-hooks",
+  "private": true,
+  "description": "Dev-only npm layer: exists solely to wire the shared commit-msg gate (husky + @casomoltd/tooling commitlint) into this Python repo. Not the project toolchain — checks, deps and versioning are uv. There is deliberately no `check` script: @casomoltd/tooling's check-gates requires eight named npm scripts, so the shipped pre-commit/pre-push cannot apply here.",
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@casomoltd/tooling": "^0.28.0",
+    "@commitlint/cli": "^20.0.0",
+    "husky": "^9.1.7"
+  }
+}

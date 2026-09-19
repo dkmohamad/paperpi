@@ -58,13 +58,19 @@ a simulation — check legibility on the real glass before calling a layout done
 **After cloning**, wire the commit hook once:
 
 ```sh
-git config core.hooksPath hooks
+npm install
 ```
 
-`hooks/commit-msg` enforces a 50-character header, 72-character body lines, and
-no AI-tool attribution. It is tracked, but `core.hooksPath` is local config and
-cannot be, so a fresh clone has to opt in. Plain shell rather than husky, so a
-Python project does not carry npm to host one hook.
+That installs a dev-only npm layer — husky plus `@casomoltd/tooling` — whose
+only job is to run the shared commitlint rules on every commit message. uv
+remains the toolchain; npm carries the hook and nothing else.
+
+This replaces a hand-written `hooks/commit-msg`, which was chosen precisely so
+a Python project would not carry npm to host one hook. That reasoning still has
+force — the layer costs about 190MB of `node_modules` for one gate. It was
+reversed because the local copy was a second home for a rule that already had
+one, and two other repos had each written their own third and fourth version of
+it. A shared rule that drifts is worth less than the disk it saves.
 
 **Checks:**
 
