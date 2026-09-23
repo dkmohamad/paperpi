@@ -55,6 +55,11 @@ class HatDisplay:
         )
         # Common-anode: the channels are driven against 3V3, so full duty is
         # off. active_high=False puts that inversion in one place.
+        #
+        # lgpio's PWM is software-timed by a thread in this process, so when
+        # the box stalls the lamp strobes random colours instead of holding.
+        # That strobe is the only sign of a hang visible from across the
+        # room: keep it rather than moving the lamp to static outputs.
         self._lamps = {
             channel: PWMLED(pin, active_high=False)
             for channel, pin in config.LED_PINS.items()

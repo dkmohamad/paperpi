@@ -93,16 +93,57 @@ Then each deploy:
 
 ```sh
 rsync -a --delete --exclude .venv --exclude provisioning \
+  --exclude .git --exclude node_modules \
   ~/dev/paperpi/ admin@paperpi.local:~/paperpi/
 ssh admin@paperpi.local 'cd paperpi && uv sync --extra hat --extra cups --no-dev'
 ssh admin@paperpi.local 'sudo install -m 644 ~/paperpi/systemd/*.service \
   ~/paperpi/systemd/*.timer /etc/systemd/system/ &&
   sudo systemctl daemon-reload &&
-  sudo systemctl enable --now paperpi paperpi-retention.timer'
+  sudo systemctl enable --now paperpi paperpi-retention.timer \
+    paperpi-memlog.timer'
 ```
 
 All the units, not just `paperpi.service` — the retention timer is one of them,
 and installing only the service is how a box ends up quietly never tidying up.
+`paperpi-memlog.timer` is explained under
+[When the box hangs](#when-the-box-hangs).
+
+### When the box hangs
+
+A hang shows as the status lamp strobing random colours: its PWM is timed in
+software by the app, so a starved process cannot hold a steady colour. Ping
+still answers, SSH stalls at the banner, and only a power-cycle recovers it.
+So the evidence has to be on disk before the hang, which takes two one-off
+changes on the Pi:
+
+```sh
+ssh admin@paperpi.local 'sudo install -d /etc/systemd/journald.conf.d &&
+  printf "[Journal]\nStorage=persistent\nSystemMaxUse=100M\n" |
+  sudo tee /etc/systemd/journald.conf.d/50-persistent.conf &&
+  sudo systemctl restart systemd-journald'
+ssh admin@paperpi.local 'sudo apt-get install -y sysstat &&
+  sudo sed -i "s/^ENABLED=\"false\"/ENABLED=\"true\"/" /etc/default/sysstat &&
+  sudo systemctl enable --now sysstat sysstat-collect.timer'
+```
+
+Raspberry Pi OS makes the journal volatile to spare the SD card
+(`40-rpi-volatile-storage.conf`, from `raspberrypi-sys-mods`), so without the
+first change every hang erases its own record; the cap bounds the wear. sysstat
+samples memory, paging and disk every ten minutes and keeps a week. The
+`paperpi-memlog` timer adds the largest processes by memory every hour, since
+`sar` shows that memory grew but not what grew it.
+
+After a power-cycle, read the boot that hung:
+
+```sh
+journalctl -b -1 -p warning --no-pager | tail -80   # oom-kill, mmc errors
+journalctl -b -1 -u paperpi-memlog --no-pager         # who grew
+sar -r -f /var/log/sysstat/saDD                       # DD: day of the hang
+```
+
+Swap is zram, so memory pressure costs CPU rather than SD writes. The box can
+still thrash for a long time before the kernel's OOM killer acts, which is why
+the hourly series matters more than whether an `oom-kill` line appears.
 
 The `hat` and `cups` extras carry the Pi-only dependencies, which is why
 `uv sync` on a desktop does not try to build them. They are separate because

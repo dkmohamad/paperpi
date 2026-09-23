@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly paperpi memory snapshot
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=hourly
+# No Persistent: a catch-up run at boot would record the fresh post-reboot
+# state beside the hung one, and a missed hour costs nothing.
+Unit=paperpi-memlog.service
+
+[Install]
+WantedBy=timers.target

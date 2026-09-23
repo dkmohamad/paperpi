@@ -7,6 +7,18 @@ something nobody has named.
 
 ## Next
 
+- [ ] **Read the memory series and name the hang.** On 23 Sep 2026 the box
+      froze with the lamp strobing, and a power-cycle erased the only record.
+      The journal is now persistent and sysstat and `paperpi-memlog` are
+      running (README § When the box hangs), so the next hang leaves
+      evidence. The app used 55.7 MB 26 s after start and 61.7 MB at 5 min 43 s.
+      On 24 Sep, or after the next hang if sooner, read
+      `journalctl -u paperpi-memlog` and `sar -r`. A steady climb in the
+      `paperpi` RSS names a leak in the app. A flat series plus an `mmc0` error
+      or a non-zero `vcgencmd get_throttled` points at the SD card or the
+      power supply instead. Done when this item names the cause, or records
+      that a week of data showed no growth and no hang.
+
 - [ ] **Split the buttons.** Every button starts a scan, which was harmless
       while the scan was a mock and is not any more — Button A now moves real
       paper. The intended split is A scans and B runs a safe unmount before the

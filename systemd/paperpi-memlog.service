@@ -1,0 +1,17 @@
+[Unit]
+Description=Log the largest processes by resident memory
+# sysstat's `sar -r` records whether the box's memory grew; it cannot say which
+# process grew it. This line in the journal names the process, so the two read
+# together once the journal is persistent.
+
+[Service]
+Type=oneshot
+# stdout goes to the journal: `journalctl -u paperpi-memlog` reads the series.
+# `args` rather than `comm`: comm is just "python" for both the app and the
+# retention job, so it could not say which one grew.
+ExecStart=/bin/sh -c 'ps -eo pid,rss,vsz,etime,args --sort=-rss --cols 160 \
+    | head -6'
+
+# DynamicUser also implies NoNewPrivileges, PrivateTmp and ProtectSystem=strict.
+DynamicUser=true
+ProtectHome=true
