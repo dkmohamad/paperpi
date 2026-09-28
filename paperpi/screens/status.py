@@ -19,7 +19,8 @@ from .scanning import ScanningScreen
 __all__ = ["StatusScreen"]
 
 # Peripheral state changes on a human timescale; polling faster would spend the
-# render loop's budget shelling out to lpstat for no visible benefit.
+# render loop's budget on sysfs reads and a CUPS round trip for no visible
+# benefit.
 _REFRESH = timedelta(seconds=2)
 
 
@@ -59,8 +60,6 @@ class StatusScreen:
         """Draw the peripheral rows, a system line, and the scan hint."""
         # The header carries the address to type; the system line below carries
         # the raw IP for when mDNS does not resolve, which on Android is often.
-        # Showing the IP in both places said one thing twice and the useful
-        # thing not at all.
         canvas.title(self._hostname, self._web_address)
 
         for index, peripheral in enumerate(self._status.peripherals):
@@ -82,9 +81,8 @@ class StatusScreen:
     def on_button(self, button: Button) -> Screen | None:
         """Start a scan.
 
-        Every button does this, which was harmless while the scan was a mock
-        and is not now that a press moves real paper. Splitting them -- A
-        scans, B unmounts the drive -- is tracked in TODO.md.
+        Every button does this, so any press moves real paper. Splitting them
+        -- A scans, B unmounts the drive -- is tracked in TODO.md.
         """
         del button
         return ScanningScreen(

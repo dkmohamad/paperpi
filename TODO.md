@@ -7,17 +7,16 @@ something nobody has named.
 
 ## Next
 
-- [ ] **Read the memory series and name the hang.** On 23 Sep 2026 the box
-      froze with the lamp strobing, and a power-cycle erased the only record.
-      The journal is now persistent and sysstat and `paperpi-memlog` are
-      running (README § When the box hangs), so the next hang leaves
-      evidence. The app used 55.7 MB 26 s after start and 61.7 MB at 5 min 43 s.
-      On 24 Sep, or after the next hang if sooner, read
-      `journalctl -u paperpi-memlog` and `sar -r`. A steady climb in the
-      `paperpi` RSS names a leak in the app. A flat series plus an `mmc0` error
-      or a non-zero `vcgencmd get_throttled` points at the SD card or the
-      power supply instead. Done when this item names the cause, or records
-      that a week of data showed no growth and no hang.
+- [ ] **Confirm the leak fix held.** Both hangs (23 and 28 Sep 2026) came
+      from pycups' `getPrinterAttributes()`, which leaks ~26 KB a call and
+      was called every 2 s, about 1.1 GB a day. `CupsQueues` now reads
+      `getPrinters()` only, and the unit caps the app at `MemoryMax=1536M`.
+      Deployed and rebooted 28 Sep 11:50. After the reboot, `memory` was in
+      `cgroup.controllers`, `MemoryMax=1610612736`, `spidev.bufsiz=65536`, and
+      `cupsreject`/`cupsaccept` flipped `accepting` both ways. 3,500 polls
+      grew +100 KB, against +91 MB before. Done when
+      `journalctl -u paperpi-memlog` shows the app's RSS within a few MB of
+      its ~56 MB start at 29 Sep 12:00, then delete this item.
 
 - [ ] **Split the buttons.** Every button starts a scan, which was harmless
       while the scan was a mock and is not any more — Button A now moves real
@@ -106,10 +105,6 @@ Structural rather than behavioural — none of these change what the box does.
 
 ## Ops
 
-- [ ] Add `spidev.bufsiz=65536` to `/boot/firmware/cmdline.txt` and reboot. The
-      default 4096 chunks each 153,600-byte frame into 38 writes; this cuts it
-      to three. Not urgent — the loop no longer pushes unchanged frames — but
-      free.
 - [ ] Revisit the escpr queue at the CUPS 3.x transition. `lpadmin` already
       warns that printer drivers are deprecated; trixie's 2.4.10 is fine, and
       the replacement is likely a Printer Application rather than a PPD. Not

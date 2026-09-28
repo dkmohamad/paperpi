@@ -7,8 +7,8 @@ changed its wording, and it is the reason IPP's keywords were chosen over
 parsing `lpstat`.
 
 The connection factory is injected for the same reason it is injected in the
-adapter: the three failure paths are the ones that must never reach the render
-loop, and a path nobody has watched engage is a path nobody knows works.
+adapter: the failure paths are the ones that must never reach the render loop,
+and a path nobody has watched engage is a path nobody knows works.
 """
 
 from typing import Any
@@ -26,19 +26,18 @@ _USB = "usb://EPSON/ET-2810%20Series?serial=0123456789ABCDEF"
 
 
 class _FakeConnection:
-    """Stands in for a pycups Connection, including its ways of failing."""
+    """Stands in for a pycups Connection.
 
-    def __init__(self, printers: dict[str, dict[str, Any]], vanishing: str = ""):
+    Deliberately has no `getPrinterAttributes`: pycups leaks every reply from
+    it, so a call reintroduced in the adapter raises here, is swallowed as an
+    unreachable server, and fails the happy-path test instead of a Pi.
+    """
+
+    def __init__(self, printers: dict[str, dict[str, Any]]):
         self._printers = printers
-        self._vanishing = vanishing
 
     def getPrinters(self) -> dict[str, dict[str, Any]]:  # noqa: N802
         return self._printers
-
-    def getPrinterAttributes(self, name: str) -> dict[str, Any]:  # noqa: N802
-        if name == self._vanishing:
-            raise RuntimeError("client-error-not-found")
-        return self._printers[name]
 
 
 def test_state_should_map_the_three_ipp_values():
@@ -123,10 +122,14 @@ def test_connection_should_classify_by_the_device_uri_scheme():
     assert _connection("cups-pdf:/") is QueueConnection.OTHER
 
 
-def test_a_present_accepting_flag_should_be_coerced_from_ipps_integer():
-    """IPP booleans arrive as 0/1, and the row branches on this being a bool."""
-    assert _queue("q", {"printer-is-accepting-jobs": 1}).accepting is True
-    assert _queue("q", {"printer-is-accepting-jobs": 0}).accepting is False
+def test_accepting_should_be_read_from_the_printer_type_rejecting_bit():
+    """0x2100c is what this Pi's queue reports.
+
+    The rejecting bit is CUPS_PRINTER_REJECTING, 0x80000:
+    https://github.com/OpenPrinting/cups/blob/v2.4.10/cups/cups.h
+    """
+    assert _queue("q", {"printer-type": 0x2100C}).accepting is True
+    assert _queue("q", {"printer-type": 0x2100C | 0x80000}).accepting is False
 
 
 def test_a_queue_should_survive_a_server_that_omits_attributes():
@@ -134,7 +137,7 @@ def test_a_queue_should_survive_a_server_that_omits_attributes():
 
     The two defaults deliberately differ. An unreadable state is stopped,
     because claiming a queue is fine on no evidence is the lie the display
-    exists to avoid. A missing accepting flag reads as accepting, because
+    exists to avoid. A missing printer-type reads as accepting, because
     "not accepting jobs" is a definite accusation and getting it wrong pins
     the row red forever -- which is how a status display stops being read.
     """
@@ -152,7 +155,7 @@ def test_queues_should_be_read_through_the_injected_connection():
             "paperpi": {
                 "device-uri": _USB,
                 "printer-state": 3,
-                "printer-is-accepting-jobs": 1,
+                "printer-type": 0x2100C,
                 "printer-state-reasons": "none",
             }
         }
@@ -161,6 +164,7 @@ def test_queues_should_be_read_through_the_injected_connection():
     assert queue.name == "paperpi"
     assert queue.connection is QueueConnection.USB
     assert queue.state is QueueState.IDLE
+    assert queue.accepting is True
 
 
 def test_an_unreachable_server_should_report_no_queues_rather_than_raise():
@@ -176,18 +180,13 @@ def test_an_unreachable_server_should_report_no_queues_rather_than_raise():
     assert CupsQueues(connect=refuse)() == ()
 
 
-def test_a_queue_deleted_mid_read_should_be_skipped_not_fatal():
-    """Listing and reading are two round trips, so a queue can vanish between.
-
-    The one that went away is no longer there to report on; the other still
-    is, and losing it too would blank the row for no reason.
-    """
+def test_queues_should_be_ordered_by_name():
+    """The reply is a dict in server order; the display wants a stable one."""
     connection = _FakeConnection(
         {
-            "going": {"device-uri": _USB, "printer-state": 3},
-            "staying": {"device-uri": _USB, "printer-state": 3},
-        },
-        vanishing="going",
+            "upstairs": {"device-uri": _USB, "printer-state": 3},
+            "kitchen": {"device-uri": _USB, "printer-state": 3},
+        }
     )
     queues = CupsQueues(connect=lambda: connection)()
-    assert [q.name for q in queues] == ["staying"]
+    assert [q.name for q in queues] == ["kitchen", "upstairs"]

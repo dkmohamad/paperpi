@@ -20,7 +20,7 @@ schemes and the integer states stay in the one module that speaks to CUPS.
 
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Protocol
 
 from ..models import (
     FaultSeverity,
@@ -34,10 +34,21 @@ __all__ = ["CupsQueues"]
 
 logger = logging.getLogger(__name__)
 
+
+class _CupsConnection(Protocol):
+    """The one part of a pycups Connection this adapter may use.
+
+    Only `getPrinters`, so a call to the leaking `getPrinterAttributes` (see
+    `CupsQueues`) is a type error rather than something a test has to catch.
+    """
+
+    def getPrinters(self) -> dict[str, dict[str, Any]]: ...  # noqa: N802
+
+
 # How to open a connection to the print server. Injected so the failure paths
 # below -- which are the ones that must never reach the render loop -- can be
 # exercised without a print server, per the repo's inject-never-patch rule.
-type Connect = Callable[[], Any]
+type Connect = Callable[[], _CupsConnection]
 
 
 class CupsQueues:
@@ -47,13 +58,20 @@ class CupsQueues:
     millisecond every couple of seconds and would leave a dead handle every
     time cupsd restarts -- and cupsd does restart on its own, because it
     idle-exits when nothing is shared. The cheap thing is also the correct one.
+
+    Everything comes from the one `getPrinters()` reply, which carries every
+    field the display reads. `getPrinterAttributes()` must not be called here:
+    pycups 2.0.4 leaks each reply it returns, about 26 KB a call measured on
+    this Pi, which at this poll rate is over a gigabyte a day -- enough to
+    starve the box into a hang within three days.
     """
 
     def __init__(self, *, connect: Connect | None = None):
         self._connect = connect
         # Only the first of a run of identical failures is logged. A cupsd
-        # outage is worth knowing about, but this is called twice a second and
-        # a repeating warning would bury everything else in the journal.
+        # outage is worth knowing about, but this is called every couple of
+        # seconds and a repeating warning would bury everything else in the
+        # journal.
         self._reported: str | None = None
 
     def __call__(self) -> Sequence[PrintQueue]:
@@ -73,8 +91,7 @@ class CupsQueues:
             return ()
 
         try:
-            connection = connect()
-            names: list[str] = sorted(connection.getPrinters())
+            printers: dict[str, dict[str, Any]] = connect().getPrinters()
         except Exception as failure:  # noqa: BLE001
             # Deliberately broad: this runs inside the render loop, and every
             # way of failing to reach the print server means the same thing to
@@ -82,22 +99,10 @@ class CupsQueues:
             # tells the room less than one reporting no queue for two seconds.
             return self._unavailable(f"{type(failure).__name__}: {failure}")
 
-        queues: list[PrintQueue] = []
-        for name in names:
-            try:
-                # getPrinters() alone is not enough: the attribute set it asks
-                # for omits printer-is-accepting-jobs, so a queue read only
-                # from there looks like it is refusing work.
-                attributes: dict[str, Any] = connection.getPrinterAttributes(name)
-            except Exception:  # noqa: BLE001
-                # A queue deleted between listing and reading. Skipping it is
-                # right: it no longer exists to report on.
-                logger.debug("queue %s went away while being read", name)
-                continue
-            queues.append(_queue(name, attributes))
-
         self._reported = None
-        return tuple(queues)
+        return tuple(
+            _queue(name, attributes) for name, attributes in sorted(printers.items())
+        )
 
     def _unavailable(self, reason: str) -> tuple[PrintQueue, ...]:
         """Report no queues, saying why the first time it happens."""
@@ -140,6 +145,12 @@ _SEVERITIES = {
 # "none".
 _NOTHING_TO_REPORT = "none"
 
+# pycups' getPrinters() does not request printer-is-accepting-jobs; CUPS also
+# folds it into the printer-type bitmask, which getPrinters() does request.
+# Source: CUPS_PRINTER_REJECTING in cups_ptype_e,
+# https://github.com/OpenPrinting/cups/blob/v2.4.10/cups/cups.h
+_CUPS_PRINTER_REJECTING = 0x80000
+
 
 def _pycups_connection() -> Connect | None:
     """The real connection factory, or None where pycups is not installed."""
@@ -156,22 +167,29 @@ def _queue(name: str, attributes: dict[str, Any]) -> PrintQueue:
     Missing attributes are read by one rule: absent evidence never manufactures
     a specific accusation. So an unreadable state is stopped -- claiming a
     queue is fine on no evidence is the lie this display exists to avoid -- but
-    an absent accepting flag reads as accepting, because "not accepting jobs"
+    an absent printer-type reads as accepting, because "not accepting jobs"
     is a definite charge and getting it wrong pins the row red forever, which
     is how a status display stops being read at all.
 
     That is the one place in this package where missing evidence can contribute
     to a READY row, and it is narrow: the state and the USB presence must both
-    independently agree. In practice the flag is always present, because the
-    caller reads per-queue attributes rather than the summary that omits it.
+    independently agree. In practice printer-type is always present: pycups'
+    getPrinters() always requests it.
     """
     return PrintQueue(
         name=name,
         connection=_connection(str(attributes.get("device-uri", ""))),
         state=_state(attributes.get("printer-state")),
-        accepting=bool(attributes.get("printer-is-accepting-jobs", True)),
+        accepting=_accepting(attributes.get("printer-type")),
         faults=_faults(attributes.get("printer-state-reasons")),
     )
+
+
+def _accepting(printer_type: object) -> bool:
+    """Read CUPS's rejecting bit, defaulting to accepting."""
+    if not isinstance(printer_type, int):
+        return True
+    return not printer_type & _CUPS_PRINTER_REJECTING
 
 
 def _state(raw: object) -> QueueState:

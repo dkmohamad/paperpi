@@ -21,6 +21,19 @@ ExecStart=/home/admin/paperpi/.venv/bin/python -m paperpi --scan-dir /mnt/scans
 Restart=on-failure
 RestartSec=5
 
+# Uncapped, a leak in this process fills the Pi's RAM and hangs the whole box.
+# Capped, the kernel kills only this service and Restart= brings it back, with
+# the reason in the journal. 1536M sits above the largest legitimate peak -- a
+# full 50-sheet duplex batch, which `_assemble` in adapters/scan_sane.py puts
+# near 950 MB -- and still leaves most of the 3.8 GB free. No swap, because it
+# is zram: letting a runaway thrash into it would hang the box more slowly
+# instead of killing the service promptly.
+# Needs `cgroup_enable=memory` in /boot/firmware/cmdline.txt (see
+# provisioning/README.md): Pi firmware disables the memory controller, and
+# without it both settings are silently ignored.
+MemoryMax=1536M
+MemorySwapMax=0
+
 # Where scans are written is a deployment choice, so it lives here rather than
 # in the code -- the default in config.py stays sensible for a development
 # machine that has no /mnt/scans.

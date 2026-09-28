@@ -445,7 +445,8 @@ class _SaneScanHandle:
         Memory is bounded by the hopper: the save decodes every page, at about
         8 MB each, so a full 50-sheet duplex batch peaks near a quarter of this
         machine's RAM. Survivable, and the reason the scratch pages live on
-        disk rather than adding to it.
+        disk rather than adding to it. It must also stay under the service's
+        `MemoryMax=` in systemd/paperpi.service, which kills the app above it.
         """
         for path in images:
             _straighten(path)

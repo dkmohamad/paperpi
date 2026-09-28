@@ -112,9 +112,12 @@ and installing only the service is how a box ends up quietly never tidying up.
 
 A hang shows as the status lamp strobing random colours: its PWM is timed in
 software by the app, so a starved process cannot hold a steady colour. Ping
-still answers, SSH stalls at the banner, and only a power-cycle recovers it.
-So the evidence has to be on disk before the hang, which takes two one-off
-changes on the Pi:
+still answers, but SSH stalls at the banner and `paperpi.local` stops
+resolving. systemd's hardware watchdog (`RuntimeWatchdogSec=1m`, a Raspberry Pi
+OS default) resets the box once systemd itself stops responding, which can take
+minutes; a power-cycle is quicker. Either way the reboot erases what was in
+memory, so the evidence has to be on disk before the hang, which takes two
+one-off changes on the Pi:
 
 ```sh
 ssh admin@paperpi.local 'sudo install -d /etc/systemd/journald.conf.d &&
@@ -133,26 +136,37 @@ samples memory, paging and disk every ten minutes and keeps a week. The
 `paperpi-memlog` timer adds the largest processes by memory every hour, since
 `sar` shows that memory grew but not what grew it.
 
-After a power-cycle, read the boot that hung:
+After the reboot, read the boot that hung. A disk stall shows as
+`task … blocked for more than 120 seconds` lines from the kernel:
 
 ```sh
-journalctl -b -1 -p warning --no-pager | tail -80   # oom-kill, mmc errors
+journalctl -b -1 -p warning --no-pager | tail -80   # oom-kill, hung tasks
 journalctl -b -1 -u paperpi-memlog --no-pager         # who grew
 sar -r -f /var/log/sysstat/saDD                       # DD: day of the hang
 ```
 
 Swap is zram, so memory pressure costs CPU rather than SD writes. The box can
 still thrash for a long time before the kernel's OOM killer acts, which is why
-the hourly series matters more than whether an `oom-kill` line appears.
+the hourly series matters more than whether an `oom-kill` line appears. The
+service's own `MemoryMax=` exists so a leak in the app restarts just that
+service — recorded in `journalctl -u paperpi`, not here.
 
 The `hat` and `cups` extras carry the Pi-only dependencies, which is why
 `uv sync` on a desktop does not try to build them. They are separate because
 the panel and the print server are separate concerns: a box could reasonably
 have one and not the other.
 
-Optional: add `spidev.bufsiz=65536` to `/boot/firmware/cmdline.txt` and reboot.
-The default is 4096, so each 153,600-byte frame is chunked into 38 writes; this
-cuts it to three.
+If a running box's card lacks the two kernel arguments from the provisioning
+step, add them by hand and reboot. Without `cgroup_enable=memory` the service's
+memory cap is silently ignored ([provisioning](provisioning/README.md) says
+why):
+
+```sh
+ssh admin@paperpi.local "sudo cp /boot/firmware/cmdline.txt{,.bak} &&
+  sudo sed -i '1 s/\$/ cgroup_enable=memory spidev.bufsiz=65536/' \
+    /boot/firmware/cmdline.txt && sudo reboot"
+ssh admin@paperpi.local 'cat /sys/fs/cgroup/cgroup.controllers'   # has memory
+```
 
 ### Storage and the scan share
 

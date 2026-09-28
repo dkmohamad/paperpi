@@ -16,9 +16,13 @@ six months newer.
 **What lands on the card.** Raspberry Pi OS Lite 64-bit 2026-06-18 (Debian 13
 trixie, kernel 6.18); hostname `paperpi` on mDNS; user `admin` — a role account,
 not a personal one — with passwordless sudo; ethernet preferred with Wi-Fi as an
-optional fallback so it boots on either; `en_GB.UTF-8` / `Europe/London`; and
+optional fallback so it boots on either; `en_GB.UTF-8` / `Europe/London`;
 `dtparam=spi=on`, since the Display HAT Mini's screen is on SPI and finding that
-out after the HAT is fitted costs a reboot.
+out after the HAT is fitted costs a reboot; and two kernel arguments, for the
+same reason. `cgroup_enable=memory` turns the memory controller back on, which
+Pi firmware disables, so the service's `MemoryMax=` is enforced instead of
+silently ignored. `spidev.bufsiz=65536` lets a 153,600-byte frame go to the
+panel in three SPI writes instead of 38.
 
 **Access.** Two independent routes, so losing one does not mean reflashing. SSH
 is key-only (`ssh_pwauth: false`, `id_ed25519` authorised) — which is also why
@@ -142,9 +146,12 @@ B=$(findmnt -no TARGET "$DEV-part1")
 cp ~/dev/paperpi/provisioning/boot/{user-data,network-config,meta-data,ssh} "$B/"
 printf '\n# Display HAT Mini (1.3" IPS) talks over SPI\ndtparam=spi=on\n' \
   >> "$B/config.txt"
+# cmdline.txt is one line; a second line is ignored, so append to the first.
+sed -i '1 s/$/ cgroup_enable=memory spidev.bufsiz=65536/' "$B/cmdline.txt"
 
 grep -E '^(hostname|ssh_pwauth):' "$B/user-data"   # paperpi, false
 grep '^dtparam=spi=on' "$B/config.txt"
+wc -l < "$B/cmdline.txt"; grep -o 'cgroup_enable=memory.*' "$B/cmdline.txt"
 test -e "$B/ssh" && echo "ssh flag present"
 sync && udisksctl unmount -b "$DEV-part1"
 ```
