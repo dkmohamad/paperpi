@@ -94,7 +94,7 @@ Then each deploy:
 ```sh
 rsync -a --delete --exclude .venv --exclude provisioning \
   --exclude .git --exclude node_modules \
-  ~/dev/paperpi/ admin@paperpi.local:~/paperpi/
+  ~/dev/records/paperpi/ admin@paperpi.local:~/paperpi/
 ssh admin@paperpi.local 'cd paperpi && uv sync --extra hat --extra cups --no-dev'
 ssh admin@paperpi.local 'sudo install -m 644 ~/paperpi/systemd/*.service \
   ~/paperpi/systemd/*.timer /etc/systemd/system/ &&

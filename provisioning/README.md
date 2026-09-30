@@ -59,7 +59,7 @@ The image is already at
 
 ```sh
 sudo install -m 0644 -o root -g root \
-  ~/dev/paperpi/provisioning/99-usb-removable-raw.rules /etc/udev/rules.d/
+  ~/dev/records/paperpi/provisioning/99-usb-removable-raw.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=block --action=add
 ```
@@ -143,7 +143,7 @@ udevadm settle
 udisksctl mount -b "$DEV-part1"
 B=$(findmnt -no TARGET "$DEV-part1")
 
-cp ~/dev/paperpi/provisioning/boot/{user-data,network-config,meta-data,ssh} "$B/"
+cp ~/dev/records/paperpi/provisioning/boot/{user-data,network-config,meta-data,ssh} "$B/"
 printf '\n# Display HAT Mini (1.3" IPS) talks over SPI\ndtparam=spi=on\n' \
   >> "$B/config.txt"
 # cmdline.txt is one line; a second line is ignored, so append to the first.
