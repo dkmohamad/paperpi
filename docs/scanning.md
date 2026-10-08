@@ -34,8 +34,9 @@ that briefly and it was a mistake.
 assumed: a sheet with `TOP` written across it came back with the writing in the
 bottom fifth of the image, loaded exactly as above.
 
-If a different scanner ever replaces this one, re-measure rather than inherit
-these: write `TOP` on one sheet, number a second, scan them loaded per that
+If a different scanner ever replaces this one (see
+[buying another](#rollers-and-buying-another-scanner)), re-measure rather than
+inherit these: write `TOP` on one sheet, number a second, scan them loaded per that
 machine's own manual, and see where the ink lands.
 
 Setup, once:
@@ -115,8 +116,8 @@ left alone.
 
 This is a hardware concern, not a performance one. The lamp is a cold-cathode
 tube — the manual's safety section warns it contains mercury — and it has a
-finite life. It is not in the consumables table, which lists only the pick and
-brake rollers (200,000 sheets or one year, with counters on the scanner). So
+finite life. It is not in the consumables table, which lists only the
+[rollers](#rollers-and-buying-another-scanner). So
 there is no way to read how much lamp life is left and no user-serviceable way
 to replace it. A probe loop that held it lit would be wearing out a part nobody
 can measure or fix.
@@ -129,5 +130,29 @@ own; nothing needs restarting. A USB-level reset is not enough: unbinding and re
 toggling its `authorized` flag, leaves it enumerated on the bus but in a state
 libusb cannot open, and `scanimage -L` then finds nothing even as root. Only a
 real power cycle re-initialises it.
+
+## Rollers, and buying another scanner
+
+The operator's guide lists the pick and brake rollers as the only consumables,
+each rated 200,000 sheets or one year, with counters on the scanner: brake
+roller `PA03540-0001`, pick roller `PA03540-0002`.
+
+Replace like for like: **a Fujitsu fi-6130 or fi-6130Z**. The rotation, the
+option spellings in `config.py` and the loading instructions above were all
+measured on this model, so anything else means re-measuring them. A used unit's
+condition is the unknown, so before buying ask the seller:
+
+1. Does it come with its power supply, the ADF paper chute and the stacker?
+2. Will it feed and scan a 10–20 sheet A4 stack in duplex?
+3. What is its lifetime page count?
+4. When were the pick and brake rollers last replaced?
+5. Any feed errors, double feeds, lines from the glass, error codes or USB
+   disconnects?
+
+Walk away from a listing that is:
+
+- marked "untested", "powers on only" or "for spares or repair";
+- missing the power supply, the chute, the stacker or the side guides;
+- not named as an fi-6130 ("ScanSnap compatible" is a different machine).
 
 Back to the [README](../README.md).
