@@ -17,13 +17,21 @@ driver=$(sudo lpinfo -m | awk '/Epson-ET-2810_Series/ {print $1}')
 sudo lpadmin -p paperpi -D paperpi -L home -v "$device" -m "$driver" \
     -o printer-is-shared=true -E
 sudo lpadmin -d paperpi
+sudo lpadmin -p paperpi -o outputorder-default=reverse
 sudo cupsctl --share-printers
 sudo systemctl restart cups
 ```
 
-Six things here are not obvious, and five of them cost an afternoon each if got
+Seven things here are not obvious, and five of them cost an afternoon each if got
 wrong:
 
+- **Pages print last-first.** The Epson stacks each sheet face up on top of the
+  previous one, so in page order a document comes out with page 1 at the bottom.
+  `outputorder-default=reverse` applies to every job the Pi converts itself, which
+  is any plain PDF from a phone or tablet. A Linux laptop whose queue came from
+  its own `cups-browsed` (not the Pi's; see the next point) converts the job
+  before sending it, so the Pi does not reorder it; set the same option on the
+  laptop's queue with `lpoptions -p <queue> -o outputorder=reverse`.
 - **`--no-install-recommends` is about correctness, not disk space.** The
   recommends include `cups-browsed`, which discovers *remote* queues and creates
   local ones — the opposite of what is wanted, and a known source of phantom
